@@ -1,0 +1,1030 @@
+import { useState, useEffect, useRef } from "react";
+
+// ── CONFIG EmailJS ──────────────────────────────────────────
+const EMAILJS_PUBLIC_KEY = "NkeIMabZ5jVKjFjKu";
+const EMAILJS_SERVICE_ID = "service_jo37wws";
+const EMAILJS_TEMPLATE_NOTIF = "template_427e77g";  // notification interne
+const EMAILJS_TEMPLATE_LEAD = "template_8maoisj";   // récap au lead
+const RECIPIENT_EMAIL = "ctsilefa@vivalea.fr";
+// ────────────────────────────────────────────────────────────
+
+const STEPS = [
+  { id: "age", label: "Âge" },
+  { id: "statut", label: "Logement" },
+  { id: "departement", label: "Département" },
+  { id: "occupants", label: "Foyer" },
+  { id: "revenus", label: "Revenus" },
+  { id: "contact", label: "Résultats" },
+];
+
+// MaPrimeAdapt' income thresholds (from competitor screenshots)
+const INCOME_THRESHOLDS = {
+  veryModest: 42357,
+  modest: 51564,
+};
+
+const DEPARTMENTS_IDF = ["75", "77", "78", "91", "92", "93", "94", "95"];
+
+const HOUSING_OPTIONS = [
+  { value: "proprietaire_occupant", label: "Propriétaire occupant" },
+  { value: "proprietaire_bailleur", label: "Propriétaire bailleur" },
+  { value: "locataire_prive", label: "Locataire d'un logement privé" },
+  { value: "locataire_social", label: "Locataire d'un logement social" },
+  { value: "autre", label: "Autre / je ne sais pas" },
+];
+
+const OCCUPANTS_OPTIONS = ["1", "2", "3", "4", "5", "6+"];
+
+const INCOME_OPTIONS = [
+  { value: "very_modest", label: `Inférieur à ${INCOME_THRESHOLDS.veryModest.toLocaleString("fr-FR")} €` },
+  { value: "modest", label: `Entre ${INCOME_THRESHOLDS.veryModest.toLocaleString("fr-FR")} € et ${INCOME_THRESHOLDS.modest.toLocaleString("fr-FR")} €` },
+  { value: "above", label: `Supérieur à ${INCOME_THRESHOLDS.modest.toLocaleString("fr-FR")} €` },
+];
+
+const SOURCE_OPTIONS = [
+  "Recherche Google",
+  "Réseaux sociaux",
+  "Bouche à oreille",
+  "Professionnel de santé",
+  "Mairie / CCAS",
+  "Autre",
+];
+
+function getEligibility(data) {
+  if (data.revenus === "very_modest") return { percent: 70, level: "very_modest" };
+  if (data.revenus === "modest") return { percent: 50, level: "modest" };
+  return { percent: 0, level: "above" };
+}
+
+function getResultMessage(eligibility, data) {
+  const { percent, level } = eligibility;
+  if (percent === 70) {
+    return {
+      headline: "Bonne nouvelle !",
+      status: "Vous êtes éligible",
+      subline: "D'après les informations renseignées, vous pourriez bénéficier de MaPrimeAdapt' pour financer vos travaux d'adaptation.",
+      detail: "Avec MaPrimeAdapt', l'État prend en charge une grande partie de vos travaux pour sécuriser votre logement : douche accessible, barres d'appui, suppression des marches, éclairage adapté…",
+      cta: "Un conseiller Vivalea vous recontacte gratuitement pour vous informer précisément le montant de vos aides et vous accompagner dans vos démarches.",
+      color: "#E9552E",
+      bg: "#fef0eb",
+      eligible: true,
+    };
+  }
+  if (percent === 50) {
+    return {
+      headline: "Vous êtes éligible !",
+      status: "Vous êtes éligible",
+      subline: "D'après les informations renseignées, vous pourriez bénéficier de MaPrimeAdapt' pour financer vos travaux d'adaptation.",
+      detail: "Notre équipe peut aussi identifier d'autres aides complémentaires (APA, caisses de retraite, aides locales) pour réduire encore votre reste à charge.",
+      cta: "Un conseiller Vivalea vous rappelle sous 48h pour faire le point ensemble, gratuitement et sans engagement.",
+      color: "#E9552E",
+      bg: "#fef0eb",
+      eligible: true,
+    };
+  }
+  return {
+    headline: "Votre situation",
+    status: "Non éligible",
+    subline: "D'après les informations renseignées, vous ne semblez pas éligible à MaPrimeAdapt' pour le moment.",
+    detail: "Mais d'autres aides existent ! Selon votre situation, vous pourriez bénéficier de l'APA, de la PCH, d'aides de votre caisse de retraite ou de dispositifs locaux. Notre équipe peut vous aider à y voir clair.",
+    cta: "Un conseiller Vivalea fera le point avec vous gratuitement sur toutes les aides possibles.",
+    color: "#8F1349",
+    bg: "#fdf2f6",
+    eligible: false,
+  };
+}
+
+
+// ── STYLES ──────────────────────────────────────────────────
+const styles = {
+  wrapper: {
+    fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
+    minHeight: "100vh",
+    background: "linear-gradient(145deg, #fff1e4 0%, #fce8d5 40%, #f5dcc8 100%)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px 16px",
+  },
+  container: {
+    width: "100%",
+    maxWidth: 560,
+    background: "#fff1e4",
+    borderRadius: 24,
+    boxShadow: "0 8px 40px rgba(143,19,73,0.10), 0 1px 3px rgba(143,19,73,0.06)",
+    overflow: "hidden",
+    position: "relative",
+  },
+  header: {
+    background: "linear-gradient(135deg, #8F1349 0%, #b12562 100%)",
+    padding: "28px 32px 22px",
+    color: "#fff",
+    textAlign: "center",
+  },
+  logo: {
+    fontSize: 22,
+    fontWeight: 700,
+    letterSpacing: "-0.02em",
+    marginBottom: 4,
+  },
+  headerSub: {
+    fontSize: 13,
+    opacity: 0.75,
+    fontWeight: 400,
+    letterSpacing: "0.02em",
+  },
+  progressBar: {
+    display: "flex",
+    alignItems: "center",
+    padding: "0 32px",
+    background: "#8F1349",
+    paddingBottom: 20,
+  },
+  progressDot: (active, done) => ({
+    width: 10,
+    height: 10,
+    borderRadius: "50%",
+    background: done ? "#f9c4d8" : active ? "#fff" : "rgba(255,255,255,0.25)",
+    transition: "all 0.3s ease",
+    flexShrink: 0,
+    border: active ? "2px solid #fff" : "none",
+    boxShadow: active ? "0 0 0 4px rgba(255,255,255,0.15)" : "none",
+  }),
+  progressLine: (done) => ({
+    flex: 1,
+    height: 2,
+    background: done ? "#f9c4d8" : "rgba(255,255,255,0.15)",
+    transition: "background 0.3s ease",
+    margin: "0 4px",
+  }),
+  progressLabels: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "8px 24px 0",
+    background: "#8F1349",
+    paddingBottom: 16,
+  },
+  progressLabel: (active) => ({
+    fontSize: 10,
+    color: active ? "#fff" : "rgba(255,255,255,0.4)",
+    fontWeight: active ? 600 : 400,
+    textAlign: "center",
+    width: `${100 / STEPS.length}%`,
+    transition: "all 0.3s ease",
+  }),
+  body: {
+    padding: "32px 32px 28px",
+    minHeight: 340,
+    display: "flex",
+    flexDirection: "column",
+  },
+  question: {
+    fontSize: 22,
+    fontWeight: 700,
+    color: "#18263F",
+    textAlign: "center",
+    lineHeight: 1.3,
+    marginBottom: 8,
+    fontFamily: "'DM Serif Display', 'Georgia', serif",
+  },
+  hint: {
+    fontSize: 14,
+    color: "#18263F",
+    opacity: 0.6,
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 1.5,
+  },
+  optionsGrid: (cols = 1) => ({
+    display: "grid",
+    gridTemplateColumns: cols > 1 ? `repeat(${cols}, 1fr)` : "1fr",
+    gap: 10,
+    marginTop: 8,
+  }),
+  optionBtn: (selected) => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "14px 18px",
+    border: `2px solid ${selected ? "#8F1349" : "#e2e8f0"}`,
+    borderRadius: 14,
+    background: selected ? "#fce8d5" : "#fff1e4",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    fontSize: 15,
+    fontWeight: selected ? 600 : 400,
+    color: "#18263F",
+    textAlign: "left",
+    outline: "none",
+  }),
+  radio: (selected) => ({
+    width: 20,
+    height: 20,
+    borderRadius: "50%",
+    border: `2px solid ${selected ? "#8F1349" : "#cbd5e1"}`,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    transition: "all 0.2s ease",
+  }),
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: "50%",
+    background: "#8F1349",
+  },
+  input: {
+    width: "100%",
+    padding: "14px 18px",
+    border: "2px solid #e2e8f0",
+    borderRadius: 14,
+    fontSize: 16,
+    color: "#18263F",
+    outline: "none",
+    transition: "border-color 0.2s ease",
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+  },
+  navRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: "auto",
+    paddingTop: 24,
+    gap: 12,
+  },
+  backBtn: {
+    padding: "12px 20px",
+    border: "2px solid #e2e8f0",
+    borderRadius: 12,
+    background: "#fff1e4",
+    color: "#18263F",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    fontFamily: "inherit",
+  },
+  nextBtn: (disabled) => ({
+    padding: "12px 28px",
+    border: "none",
+    borderRadius: 12,
+    background: disabled ? "#cbd5e1" : "linear-gradient(135deg, #8F1349, #a61d58)",
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: 600,
+    cursor: disabled ? "not-allowed" : "pointer",
+    transition: "all 0.2s ease",
+    fontFamily: "inherit",
+    marginLeft: "auto",
+    boxShadow: disabled ? "none" : "0 4px 12px rgba(143,19,73,0.25)",
+  }),
+  ctaBtn: (color = "#16a34a") => ({
+    padding: "16px 32px",
+    border: "none",
+    borderRadius: 14,
+    background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    fontFamily: "inherit",
+    width: "100%",
+    boxShadow: `0 4px 16px ${color}40`,
+    letterSpacing: "0.01em",
+  }),
+  fieldGroup: {
+    marginBottom: 16,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#18263F",
+    marginBottom: 6,
+    display: "block",
+  },
+  required: {
+    color: "#ef4444",
+    marginLeft: 2,
+  },
+  error: {
+    fontSize: 12,
+    color: "#ef4444",
+    marginTop: 4,
+  },
+  select: {
+    width: "100%",
+    padding: "14px 18px",
+    border: "2px solid #e2e8f0",
+    borderRadius: 14,
+    fontSize: 15,
+    color: "#18263F",
+    background: "#fff1e4",
+    outline: "none",
+    fontFamily: "inherit",
+    appearance: "none",
+    boxSizing: "border-box",
+    cursor: "pointer",
+  },
+  resultCard: (bg) => ({
+    background: bg,
+    borderRadius: 16,
+    padding: "24px",
+    marginBottom: 20,
+    textAlign: "center",
+  }),
+  resultPercent: (color) => ({
+    fontSize: 56,
+    fontWeight: 800,
+    color: color,
+    lineHeight: 1,
+    fontFamily: "'DM Serif Display', Georgia, serif",
+  }),
+  resultLabel: {
+    fontSize: 14,
+    color: "#18263F",
+    opacity: 0.6,
+    marginTop: 4,
+  },
+  checkmark: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
+  footer: {
+    textAlign: "center",
+    padding: "12px 32px 20px",
+    borderTop: "1px solid #f1f5f9",
+  },
+  footerText: {
+    fontSize: 11,
+    color: "#18263F",
+    opacity: 0.5,
+    lineHeight: 1.5,
+  },
+  badge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    background: "rgba(255,255,255,0.15)",
+    borderRadius: 20,
+    padding: "4px 12px",
+    fontSize: 11,
+    color: "#fff",
+    marginTop: 8,
+    fontWeight: 500,
+  },
+  // Confirmation overlay
+  confirmOverlay: {
+    position: "absolute",
+    inset: 0,
+    background: "rgba(255,255,255,0.97)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+    zIndex: 10,
+    borderRadius: 24,
+    textAlign: "center",
+  },
+};
+
+// ── COMPONENTS ──────────────────────────────────────────────
+
+function ProgressBar({ step }) {
+  return (
+    <>
+      <div style={styles.progressBar}>
+        {STEPS.map((s, i) => (
+          <React.Fragment key={s.id}>
+            <div style={styles.progressDot(i === step, i < step)} />
+            {i < STEPS.length - 1 && <div style={styles.progressLine(i < step)} />}
+          </React.Fragment>
+        ))}
+      </div>
+      <div style={styles.progressLabels}>
+        {STEPS.map((s, i) => (
+          <div key={s.id} style={styles.progressLabel(i === step || i < step)}>
+            {s.label}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function OptionButton({ label, emoji, selected, onClick, style: extraStyle }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{ ...styles.optionBtn(selected), ...extraStyle }}
+      onMouseEnter={(e) => {
+        if (!selected) e.target.style.borderColor = "#94a3b8";
+      }}
+      onMouseLeave={(e) => {
+        if (!selected) e.target.style.borderColor = "#e2e8f0";
+      }}
+    >
+      <div style={styles.radio(selected)}>
+        {selected && <div style={styles.radioDot} />}
+      </div>
+      {emoji && <span style={{ fontSize: 20 }}>{emoji}</span>}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function NavButtons({ onBack, onNext, canGoNext, showBack, nextLabel = "Continuer" }) {
+  return (
+    <div style={styles.navRow}>
+      {showBack ? (
+        <button style={styles.backBtn} onClick={onBack}>
+          ← Retour
+        </button>
+      ) : (
+        <div />
+      )}
+      <button
+        style={styles.nextBtn(!canGoNext)}
+        onClick={onNext}
+        disabled={!canGoNext}
+      >
+        {nextLabel} →
+      </button>
+    </div>
+  );
+}
+
+// ── STEP COMPONENTS ─────────────────────────────────────────
+
+function StepAge({ data, onChange }) {
+  return (
+    <>
+      <h2 style={styles.question}>
+        Quelle est la tranche d'âge de la personne concernée ?
+      </h2>
+      <p style={styles.hint}>
+        La personne qui souhaite adapter son logement.
+      </p>
+      <div style={styles.optionsGrid(2)}>
+        <OptionButton
+          label="Moins de 60 ans"
+          selected={data.age === "less_60"}
+          onClick={() => onChange("age", "less_60")}
+        />
+        <OptionButton
+          label="60 ans ou plus"
+          selected={data.age === "60_plus"}
+          onClick={() => onChange("age", "60_plus")}
+        />
+      </div>
+    </>
+  );
+}
+
+function StepStatut({ data, onChange }) {
+  return (
+    <>
+      <h2 style={styles.question}>
+        Concernant son logement, cette personne est :
+      </h2>
+      <p style={styles.hint}>
+        Le statut d'occupation détermine l'éligibilité aux aides.
+      </p>
+      <div style={styles.optionsGrid(1)}>
+        {HOUSING_OPTIONS.map((opt) => (
+          <OptionButton
+            key={opt.value}
+            label={opt.label}
+            selected={data.statut === opt.value}
+            onClick={() => onChange("statut", opt.value)}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function StepDepartement({ data, onChange }) {
+  const isValid = data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
+  return (
+    <>
+      <h2 style={styles.question}>
+        Quel est le numéro de département du logement ?
+      </h2>
+      <p style={styles.hint}>
+        Le département du logement concerné par les travaux d'adaptation.
+      </p>
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={3}
+        placeholder="Ex : 75, 92, 93..."
+        value={data.departement || ""}
+        onChange={(e) => onChange("departement", e.target.value.trim())}
+        style={{
+          ...styles.input,
+          borderColor: data.departement && !isValid ? "#ef4444" : "#e2e8f0",
+          textAlign: "center",
+          fontSize: 24,
+          fontWeight: 700,
+          letterSpacing: 4,
+        }}
+        onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
+        onBlur={(e) => (e.target.style.borderColor = data.departement && !isValid ? "#ef4444" : "#e2e8f0")}
+      />
+      {data.departement && !isValid && (
+        <p style={styles.error}>Veuillez saisir un numéro de département valide.</p>
+      )}
+    </>
+  );
+}
+
+function StepOccupants({ data, onChange }) {
+  return (
+    <>
+      <h2 style={styles.question}>
+        Combien de personnes habitent dans ce logement ?
+      </h2>
+      <p style={styles.hint}>
+        Le nombre d'occupants, y compris la personne concernée.
+      </p>
+      <div style={styles.optionsGrid(3)}>
+        {OCCUPANTS_OPTIONS.map((n) => (
+          <OptionButton
+            key={n}
+            label={n}
+            selected={data.occupants === n}
+            onClick={() => onChange("occupants", n)}
+            style={{ justifyContent: "center", padding: "16px 12px" }}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function StepRevenus({ data, onChange }) {
+  return (
+    <>
+      <h2 style={styles.question}>
+        Quel est le revenu fiscal de référence du foyer ?
+      </h2>
+      <p style={styles.hint}>
+        Revenu cumulé de toutes les personnes présentes dans le logement (avis d'imposition N-1).
+      </p>
+      <div style={styles.optionsGrid(1)}>
+        {INCOME_OPTIONS.map((opt) => (
+          <OptionButton
+            key={opt.value}
+            label={opt.label}
+            selected={data.revenus === opt.value}
+            onClick={() => onChange("revenus", opt.value)}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function StepContact({ data, onChange, errors }) {
+  const eligibility = getEligibility(data);
+  const teaser =
+    eligibility.percent > 0
+      ? `Vos résultats sont prêts ! Découvrez le montant de vos aides.`
+      : `Votre estimation est prête. Découvrez les options disponibles.`;
+
+  return (
+    <>
+      <h2 style={styles.question}>Vos résultats sont prêts</h2>
+      <p style={styles.hint}>{teaser}<br />Renseignez vos coordonnées pour recevoir votre synthèse personnalisée.</p>
+
+      <div style={styles.fieldGroup}>
+        <label style={styles.fieldLabel}>
+          Prénom et Nom <span style={styles.required}>*</span>
+        </label>
+        <input
+          type="text"
+          placeholder="Caroline Dupont"
+          value={data.nom || ""}
+          onChange={(e) => onChange("nom", e.target.value)}
+          style={{
+            ...styles.input,
+            borderColor: errors?.nom ? "#ef4444" : "#e2e8f0",
+          }}
+          onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
+          onBlur={(e) => (e.target.style.borderColor = errors?.nom ? "#ef4444" : "#e2e8f0")}
+        />
+        {errors?.nom && <p style={styles.error}>{errors.nom}</p>}
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <label style={styles.fieldLabel}>
+          Téléphone <span style={styles.required}>*</span>
+        </label>
+        <input
+          type="tel"
+          placeholder="06 00 00 00 00"
+          value={data.telephone || ""}
+          onChange={(e) => onChange("telephone", e.target.value)}
+          style={{
+            ...styles.input,
+            borderColor: errors?.telephone ? "#ef4444" : "#e2e8f0",
+          }}
+          onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
+          onBlur={(e) => (e.target.style.borderColor = errors?.telephone ? "#ef4444" : "#e2e8f0")}
+        />
+        {errors?.telephone && <p style={styles.error}>{errors.telephone}</p>}
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <label style={styles.fieldLabel}>
+          Adresse email <span style={styles.required}>*</span>
+        </label>
+        <input
+          type="email"
+          placeholder="exemple@email.fr"
+          value={data.email || ""}
+          onChange={(e) => onChange("email", e.target.value)}
+          style={{
+            ...styles.input,
+            borderColor: errors?.email ? "#ef4444" : "#e2e8f0",
+          }}
+          onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
+          onBlur={(e) => (e.target.style.borderColor = errors?.email ? "#ef4444" : "#e2e8f0")}
+        />
+        {errors?.email && <p style={styles.error}>{errors.email}</p>}
+      </div>
+
+      <div style={styles.fieldGroup}>
+        <label style={styles.fieldLabel}>Comment avez-vous connu Vivalea ? <span style={styles.required}>*</span></label>
+        <select
+          value={data.source || ""}
+          onChange={(e) => onChange("source", e.target.value)}
+          style={{
+            ...styles.select,
+            borderColor: errors?.source ? "#ef4444" : "#e2e8f0",
+          }}
+        >
+          <option value="">— Sélectionnez —</option>
+          {SOURCE_OPTIONS.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        {errors?.source && <p style={styles.error}>{errors.source}</p>}
+      </div>
+    </>
+  );
+}
+
+function ResultScreen({ data, onReset }) {
+  const eligibility = getEligibility(data);
+  const msg = getResultMessage(eligibility, data);
+
+  return (
+    <div style={{ animation: "fadeIn 0.5s ease" }}>
+      <div style={styles.resultCard(msg.bg)}>
+        <div style={{
+          width: 64,
+          height: 64,
+          borderRadius: "50%",
+          background: msg.eligible ? "#fef0eb" : "#fdf2f6",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          margin: "0 auto 12px",
+          border: `3px solid ${msg.color}`,
+        }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={msg.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {msg.eligible ? (
+              <polyline points="20 6 9 17 4 12" />
+            ) : (
+              <>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </>
+            )}
+          </svg>
+        </div>
+        <div style={{
+          fontSize: 24,
+          fontWeight: 700,
+          color: msg.color,
+          lineHeight: 1.2,
+          fontFamily: "'DM Serif Display', Georgia, serif",
+        }}>
+          {msg.status}
+        </div>
+        <div style={styles.resultLabel}>à MaPrimeAdapt'</div>
+      </div>
+
+      {/* Récapitulatif de la simulation */}
+      <div style={{
+        background: "#fff",
+        borderRadius: 12,
+        padding: "16px 20px",
+        marginBottom: 24,
+        border: "1px solid #f0d5c8",
+      }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: "#E9552E", marginBottom: 10, marginTop: 0 }}>
+          Récapitulatif de votre simulation
+        </p>
+        {[
+          { label: "Âge", value: data.age === "60_plus" ? "60 ans ou plus" : "Moins de 60 ans" },
+          { label: "Statut", value: HOUSING_OPTIONS.find(o => o.value === data.statut)?.label },
+          { label: "Département", value: data.departement },
+          { label: "Occupants", value: data.occupants === "6+" ? "6 ou plus" : data.occupants },
+          { label: "Revenus", value: INCOME_OPTIONS.find(o => o.value === data.revenus)?.label },
+        ].map((row, i) => (
+          <div key={i} style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "8px 0",
+            borderTop: i > 0 ? "1px solid #f0e5df" : "none",
+          }}>
+            <span style={{ fontSize: 13, color: "#18263F", opacity: 0.6 }}>{row.label}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#18263F", textAlign: "right", maxWidth: "60%" }}>{row.value}</span>
+          </div>
+        ))}
+      </div>
+
+      <h3 style={{ ...styles.question, fontSize: 20, marginBottom: 8 }}>{msg.headline}</h3>
+      <p style={{ fontSize: 15, color: "#18263F", lineHeight: 1.6, textAlign: "center", marginBottom: 8 }}>
+        {msg.subline}
+      </p>
+      <p style={{ fontSize: 14, color: "#18263F", lineHeight: 1.6, textAlign: "center", marginBottom: 20, opacity: 0.7 }}>
+        {msg.detail}
+      </p>
+
+      <div style={{
+        background: "#fef0eb",
+        borderRadius: 12,
+        padding: "16px 20px",
+        marginBottom: 16,
+        borderLeft: `4px solid ${msg.color}`,
+      }}>
+        <p style={{ fontSize: 14, color: "#18263F", lineHeight: 1.6, margin: 0 }}>
+          {msg.cta}
+        </p>
+      </div>
+
+      <div style={{
+        background: "#fff",
+        borderRadius: 12,
+        padding: "14px 20px",
+        marginBottom: 24,
+        border: "1px solid #f0d5c8",
+      }}>
+        <p style={{ fontSize: 13, color: "#18263F", opacity: 0.7, margin: 0, lineHeight: 1.6 }}>
+          Un email récapitulatif avec votre estimation a été envoyé à <strong style={{ opacity: 1 }}>{data.email}</strong>.
+          <br />Un conseiller Vivalea vous recontactera dans les plus brefs délais.
+        </p>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, flexDirection: "column" }}>
+        {!msg.eligible && (
+          <a
+            href="tel:+33000000000"
+            style={{
+              ...styles.ctaBtn("#8F1349"),
+              textDecoration: "none",
+              textAlign: "center",
+              display: "block",
+            }}
+          >
+            Être rappelé gratuitement
+          </a>
+        )}
+        <button
+          onClick={onReset}
+          style={{
+            ...styles.backBtn,
+            width: "100%",
+            textAlign: "center",
+          }}
+        >
+          Faire une nouvelle simulation
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── CONFIRMATION OVERLAY ────────────────────────────────────
+
+function ConfirmationOverlay({ visible }) {
+  if (!visible) return null;
+  return (
+    <div style={styles.confirmOverlay}>
+      <div style={{ marginBottom: 16 }}>
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#8F1349" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
+        </svg>
+      </div>
+      <h3 style={{ ...styles.question, fontSize: 20 }}>Envoi en cours...</h3>
+      <p style={{ color: "#18263F", opacity: 0.6, fontSize: 14 }}>Vos données sont transmises en toute sécurité.</p>
+    </div>
+  );
+}
+
+// ── MAIN APP ────────────────────────────────────────────────
+
+export default function SimulateurMaPrimeAdapt() {
+  const [step, setStep] = useState(0);
+  const [data, setData] = useState({});
+  const [errors, setErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
+  const bodyRef = useRef(null);
+
+  const onChange = (field, value) => {
+    setData((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  const canGoNext = () => {
+    switch (step) {
+      case 0: return !!data.age;
+      case 1: return !!data.statut;
+      case 2: return data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
+      case 3: return !!data.occupants;
+      case 4: return !!data.revenus;
+      case 5: return !!data.nom && !!data.telephone && !!data.email && !!data.source;
+      default: return false;
+    }
+  };
+
+  const validateContact = () => {
+    const errs = {};
+    if (!data.nom?.trim()) errs.nom = "Ce champ est obligatoire.";
+    if (!data.telephone?.trim()) errs.telephone = "Ce champ est obligatoire.";
+    else if (!/^[\d\s+()-]{10,}$/.test(data.telephone)) errs.telephone = "Numéro invalide.";
+    if (!data.email?.trim()) errs.email = "Ce champ est obligatoire.";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) errs.email = "Email invalide.";
+    if (!data.source) errs.source = "Ce champ est obligatoire.";
+    return errs;
+  };
+
+  const handleSubmit = async () => {
+    const errs = validateContact();
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      return;
+    }
+
+    setSending(true);
+    const eligibility = getEligibility(data);
+    const eligLabel = eligibility.level === "very_modest" ? "Éligible (très modeste)" : eligibility.level === "modest" ? "Éligible (modeste)" : "Non éligible";
+
+    // Paramètres partagés pour les templates EmailJS
+    const templateParams = {
+      lead_nom: data.nom,
+      lead_telephone: data.telephone,
+      lead_email: data.email,
+      lead_source: data.source || "Non renseigné",
+      sim_age: data.age === "60_plus" ? "60 ans ou plus" : "Moins de 60 ans",
+      sim_statut: HOUSING_OPTIONS.find((o) => o.value === data.statut)?.label || data.statut,
+      sim_departement: data.departement,
+      sim_occupants: data.occupants,
+      sim_revenus: INCOME_OPTIONS.find((o) => o.value === data.revenus)?.label || data.revenus,
+      sim_eligibilite: eligLabel,
+      timestamp: new Date().toLocaleString("fr-FR"),
+      to_email: RECIPIENT_EMAIL,
+    };
+
+    const sendEmail = (templateId, params) =>
+      fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service_id: EMAILJS_SERVICE_ID,
+          template_id: templateId,
+          user_id: EMAILJS_PUBLIC_KEY,
+          template_params: params,
+        }),
+      });
+
+    try {
+      // Email 1 : notification interne à ctsilefa@vivalea.fr
+      await sendEmail(EMAILJS_TEMPLATE_NOTIF, templateParams);
+      // Email 2 : récap au lead
+      await sendEmail(EMAILJS_TEMPLATE_LEAD, templateParams);
+    } catch (err) {
+      console.error("EmailJS error:", err);
+    }
+
+    setSending(false);
+    setSubmitted(true);
+  };
+
+  const goNext = () => {
+    if (step === 5) {
+      handleSubmit();
+      return;
+    }
+    if (canGoNext()) {
+      setStep((s) => s + 1);
+    }
+  };
+
+  const goBack = () => setStep((s) => Math.max(0, s - 1));
+
+  const reset = () => {
+    setStep(0);
+    setData({});
+    setErrors({});
+    setSubmitted(false);
+  };
+
+  // Auto-advance on selection for simple steps
+  useEffect(() => {
+    if ([0, 1, 3, 4].includes(step)) {
+      const field = ["age", "statut", "", "occupants", "revenus"][step];
+      if (field && data[field]) {
+        const timer = setTimeout(() => goNext(), 400);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [data.age, data.statut, data.occupants, data.revenus]);
+
+  // Scroll to top of body on step change
+  useEffect(() => {
+    bodyRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
+  }, [step]);
+
+  const renderStep = () => {
+    if (submitted) return <ResultScreen data={data} onReset={reset} />;
+    switch (step) {
+      case 0: return <StepAge data={data} onChange={onChange} />;
+      case 1: return <StepStatut data={data} onChange={onChange} />;
+      case 2: return <StepDepartement data={data} onChange={onChange} />;
+      case 3: return <StepOccupants data={data} onChange={onChange} />;
+      case 4: return <StepRevenus data={data} onChange={onChange} />;
+      case 5: return <StepContact data={data} onChange={onChange} errors={errors} />;
+      default: return null;
+    }
+  };
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap');
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        * { box-sizing: border-box; }
+        button:hover { opacity: 0.92; }
+        input:focus, select:focus { border-color: #8F1349 !important; }
+      `}</style>
+      <div style={styles.wrapper}>
+        <div style={styles.container}>
+          <ConfirmationOverlay visible={sending} />
+
+          <div style={{
+            background: "linear-gradient(135deg, #8F1349 0%, #b12562 100%)",
+            padding: "20px 32px 14px",
+            textAlign: "center",
+            color: "#fff",
+          }}>
+            <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 8 }}>Vivalea</div>
+            <div style={styles.headerSub}>
+              Simulateur MaPrimeAdapt'
+            </div>
+            <div style={styles.badge}>
+              Gratuit · Sans engagement · Confidentiel
+            </div>
+          </div>
+
+          {!submitted && <ProgressBar step={step} />}
+
+          <div style={styles.body} ref={bodyRef} key={step}>
+            <div style={{ animation: "fadeIn 0.35s ease" }}>
+              {renderStep()}
+            </div>
+
+            {!submitted && (
+              <NavButtons
+                showBack={step > 0}
+                onBack={goBack}
+                onNext={goNext}
+                canGoNext={canGoNext()}
+                nextLabel={step === 5 ? "Découvrir mes aides" : "Continuer"}
+              />
+            )}
+          </div>
+
+          <div style={styles.footer}>
+            <p style={styles.footerText}>
+              Vivalea · Entreprise à impact et ESS · Simulation indicative, non contractuelle.
+              <br />Vos données sont traitées de manière confidentielle.
+            </p>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
