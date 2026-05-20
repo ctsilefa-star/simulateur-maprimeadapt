@@ -937,25 +937,18 @@ function SimulateurMaPrimeAdapt() {
       to_email: RECIPIENT_EMAIL,
     };
 
-    const sendEmail = (templateId, params) =>
-      fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    const sendEmail = (payload) =>
+      fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          service_id: EMAILJS_SERVICE_ID,
-          template_id: templateId,
-          user_id: EMAILJS_PUBLIC_KEY,
-          template_params: params,
-        }),
+        body: JSON.stringify(payload),
       });
 
     try {
-      // Email 1 : notification interne à ctsilefa@vivalea.fr
-      await sendEmail(EMAILJS_TEMPLATE_NOTIF, templateParams);
-      // Email 2 : récap au lead
-      await sendEmail(EMAILJS_TEMPLATE_LEAD, templateParams);
+      // Envoi via Vercel Function (Resend) — 1 seul appel pour les 2 emails (interne + prospect)
+      await sendEmail(templateParams);
     } catch (err) {
-      console.error("EmailJS error:", err);
+      console.error("Send email error:", err);
     }
 
     setSending(false);
