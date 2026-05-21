@@ -1,4 +1,4 @@
-// /api/send-email.js — Vercel Function pour MaPrimeAdapt (Resend + notif.vivalea.fr)
+// /api/send-email.js — Vivalea MaPrimeAdapt (Resend + notif.vivalea.fr) - 1779352570
 // Templates harmonisés avec le Diagnostic Coût Aidant (même structure, mêmes couleurs)
 
 const esc = (s) => String(s || "").replace(/[<>&"']/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&#39;"}[c]));
