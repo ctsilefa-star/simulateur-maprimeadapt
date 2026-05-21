@@ -150,42 +150,51 @@ export default async function handler(req, res) {
   const FROM = process.env.RESEND_FROM || "Vivalea Adapt <onboarding@resend.dev>";
   const INTERNAL_TO = process.env.INTERNAL_EMAIL || "ctsilefa@vivalea.fr";
   
-  try {
-    // ── ENVOI BATCH : les 2 emails dans une seule requête API ──────────
-    const batchPayload = [
-      {
-        from: FROM,
-        to: [INTERNAL_TO],
-        reply_to: data.lead_email,
-        subject: `🏠 Nouveau lead MaPrimeAdapt' — ${data.lead_nom} (${data.sim_eligibilite})`,
-        html: buildInternalEmail(data),
-      },
-      {
-        from: FROM,
-        to: [data.lead_email],
-        reply_to: INTERNAL_TO,
-        subject: `Votre simulation MaPrimeAdapt' — Vivalea`,
-        html: buildProspectEmail(data),
-      },
-    ];
-    
-    console.log("Sending batch to:", [INTERNAL_TO, data.lead_email]);
-    
-    const batchRes = await fetch("https://api.resend.com/emails/batch", {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  
+  async function sendEmail(payload, label) {
+    const resp = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify(batchPayload),
+      body: JSON.stringify(payload),
     });
+    const result = await resp.json();
+    console.log(`[${label}] status=${resp.status} result=${JSON.stringify(result)}`);
+    return { ok: resp.ok, status: resp.status, result };
+  }
+  
+  try {
+    // 1️⃣ Email INTERNE
+    const internal = await sendEmail({
+      from: FROM, to: [INTERNAL_TO], reply_to: data.lead_email,
+      subject: `🏠 Nouveau lead MaPrimeAdapt' — ${data.lead_nom} (${data.sim_eligibilite})`,
+      html: buildInternalEmail(data),
+    }, "INTERNAL");
     
-    const batchResult = await batchRes.json();
-    
-    if (!batchRes.ok) {
-      console.error("Resend batch failed:", JSON.stringify(batchResult));
-      return res.status(500).json({ error: "Resend batch failed", details: batchResult });
+    if (!internal.ok) {
+      return res.status(500).json({ error: "Internal email failed", details: internal.result });
     }
     
-    console.log("Batch sent successfully:", JSON.stringify(batchResult));
-    return res.status(200).json({ ok: true, data: batchResult.data });
+    // ⏱️ Délai pour respecter le rate-limit Resend (2 req/sec en gratuit)
+    await sleep(700);
+    
+    // 2️⃣ Email PROSPECT
+    const prospect = await sendEmail({
+      from: FROM, to: [data.lead_email], reply_to: INTERNAL_TO,
+      subject: `Votre simulation MaPrimeAdapt' — Vivalea`,
+      html: buildProspectEmail(data),
+    }, "PROSPECT");
+    
+    if (!prospect.ok) {
+      return res.status(207).json({
+        ok: true, internalSent: true, prospectFailed: true,
+        prospectError: prospect.result, internalId: internal.result.id,
+      });
+    }
+    
+    return res.status(200).json({
+      ok: true, internalId: internal.result.id, prospectId: prospect.result.id,
+    });
   } catch (err) {
     console.error("Send error:", err.message, err.stack);
     return res.status(500).json({ error: err.message });
