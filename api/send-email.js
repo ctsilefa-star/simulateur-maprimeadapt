@@ -12,9 +12,9 @@ const C = {
 
 // Couleurs selon niveau d'éligibilité
 const eligColors = (label) => {
-  if (label.includes("très modeste")) return { c: C.green, bg: "#E6F5F0", emoji: "🎉", short: "Éligible" };
-  if (label.includes("modeste") && !label.includes("Non")) return { c: C.orange, bg: "#FFF1E4", emoji: "✨", short: "Éligible" };
-  return { c: C.muted, bg: C.bg, emoji: "ℹ️", short: "À étudier" };
+  if (label.includes("très modeste")) return { c: C.green, bg: "#E6F5F0", short: "Éligible" };
+  if (label.includes("modeste") && !label.includes("Non")) return { c: C.orange, bg: "#FFF1E4", short: "Éligible" };
+  return { c: C.muted, bg: C.bg, short: "À étudier" };
 };
 
 const header = (badge, title, subtitle) => `
@@ -26,7 +26,7 @@ const header = (badge, title, subtitle) => `
 
 const section = (icon, title, content, bgColor = "transparent") => `
   <div style="padding:24px 32px;border-bottom:1px solid ${C.border};${bgColor !== "transparent" ? `background:${bgColor};` : ""}">
-    <div style="font-size:11px;color:${C.magenta};font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:14px;">${icon} ${esc(title)}</div>
+    <div style="font-size:11px;color:${C.magenta};font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:14px;">${icon ? icon + " " : ""}${esc(title)}</div>
     ${content}
   </div>`;
 
@@ -66,16 +66,16 @@ function buildInternalEmail(d) {
     </div>
   </div>
   <div style="padding:20px 32px;background:${elig.bg};border-bottom:1px solid ${C.border};text-align:center;">
-    <div style="font-size:11px;color:${elig.c};font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">${elig.emoji} Statut d'éligibilité</div>
+    <div style="font-size:11px;color:${elig.c};font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">Statut d'éligibilité</div>
     <div style="font-size:22px;font-weight:700;color:${elig.c};">${esc(d.sim_eligibilite)}</div>
   </div>
-  ${section("📇", "Coordonnées du lead", table(
+  ${section("", "Coordonnées du lead", table(
     row("Nom", d.lead_nom, {bold: true}) +
     row("Téléphone", `<a href="tel:${esc(d.lead_telephone)}" style="color:${C.magenta};text-decoration:none;font-weight:700;">${esc(d.lead_telephone)}</a>`, {raw: true}) +
     row("Email", `<a href="mailto:${esc(d.lead_email)}" style="color:${C.magenta};text-decoration:none;">${esc(d.lead_email)}</a>`, {raw: true}) +
     row("Source", d.lead_source)
   ))}
-  ${section("🏠", "Profil de la simulation", table(
+  ${section("", "Profil de la simulation", table(
     row("Âge", d.sim_age, {bold: true}) +
     row("Statut occupation logement", d.sim_statut) +
     row("Département", d.sim_departement) +
@@ -104,24 +104,24 @@ function buildProspectEmail(d) {
 <div style="max-width:640px;margin:0 auto;background:${C.white};">
   ${header("Votre simulation personnalisée", "Vivalea Adapt", `Merci ${d.lead_nom}, voici votre résultat`)}
   <div style="padding:28px 32px;border-bottom:1px solid ${C.border};background:${elig.bg};text-align:center;">
-    <div style="font-size:12px;color:${elig.c};font-weight:700;margin-bottom:8px;letter-spacing:0.1em;text-transform:uppercase;">${elig.emoji} Résultat de votre simulation</div>
+    <div style="font-size:12px;color:${elig.c};font-weight:700;margin-bottom:8px;letter-spacing:0.1em;text-transform:uppercase;">Résultat de votre simulation</div>
     <div style="font-size:26px;font-weight:700;color:${elig.c};line-height:1.2;">${esc(d.sim_eligibilite)}</div>
   </div>
   <div style="padding:24px 32px;font-size:15px;line-height:1.6;color:${C.navy};border-bottom:1px solid ${C.border};">
     <p style="margin:0 0 12px;">Bonjour ${esc(d.lead_nom)},</p>
     <p style="margin:0;">${message}</p>
   </div>
-  ${section("📋", "Récapitulatif de votre saisie", table(
+  ${section("", "Récapitulatif de votre saisie", table(
     row("Âge", d.sim_age, {bold: true}) +
     row("Statut logement", d.sim_statut) +
     row("Département", d.sim_departement) +
     row("Personnes au foyer", `${esc(d.sim_occupants)} personne(s)`) +
     row("Tranche de revenus", d.sim_revenus)
   ))}
-  ${section("ℹ️", "À propos de MaPrimeAdapt'", `
+  ${section("", "À propos de MaPrimeAdapt'", `
     <div style="font-size:13px;line-height:1.6;color:${C.navy};">
       MaPrimeAdapt' est une aide de l'État destinée à financer les travaux d'adaptation du logement pour les personnes âgées ou en situation de handicap. Elle peut couvrir jusqu'à <strong>70% du montant des travaux</strong> (plafonnés à 22 000 €), avec une bonification possible pour les ménages très modestes.
-      <div style="font-size:12px;color:${C.muted};margin-top:10px;">📎 Source : Service-Public.fr · MaPrimeAdapt' 2024</div>
+      <div style="font-size:12px;color:${C.muted};margin-top:10px;">Source : Service-Public.fr · MaPrimeAdapt' 2024</div>
     </div>
   `, C.bg)}
   <div style="padding:28px 32px;text-align:center;">
@@ -164,10 +164,10 @@ export default async function handler(req, res) {
   }
   
   try {
-    // 1️⃣ Email INTERNE
+    // 1⃣ Email INTERNE
     const internal = await sendEmail({
       from: FROM, to: [INTERNAL_TO], reply_to: data.lead_email,
-      subject: `🏠 Nouveau lead MaPrimeAdapt' — ${data.lead_nom} (${data.sim_eligibilite})`,
+      subject: `Nouveau lead MaPrimeAdapt' — ${data.lead_nom} (${data.sim_eligibilite})`,
       html: buildInternalEmail(data),
     }, "INTERNAL");
     
@@ -175,10 +175,10 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Internal email failed", details: internal.result });
     }
     
-    // ⏱️ Délai pour respecter le rate-limit Resend (2 req/sec en gratuit)
+    // ⏱ Délai pour respecter le rate-limit Resend (2 req/sec en gratuit)
     await sleep(700);
     
-    // 2️⃣ Email PROSPECT
+    // 2⃣ Email PROSPECT
     const prospect = await sendEmail({
       from: FROM, to: [data.lead_email], reply_to: INTERNAL_TO,
       subject: `Votre simulation MaPrimeAdapt' — Vivalea`,
