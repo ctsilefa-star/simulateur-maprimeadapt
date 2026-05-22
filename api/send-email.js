@@ -148,7 +148,7 @@ export default async function handler(req, res) {
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
   if (!RESEND_API_KEY) return res.status(500).json({ error: "RESEND_API_KEY not configured" });
   const FROM = process.env.RESEND_FROM || "Vivalea Adapt <onboarding@resend.dev>";
-  const INTERNAL_TO = process.env.INTERNAL_EMAIL || "ctsilefa@vivalea.fr";
+  const INTERNAL_TO = process.env.INTERNAL_EMAIL || "lea@vivalea.fr";
   
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   

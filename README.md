@@ -62,7 +62,7 @@ Configurer sur https://vercel.com/vivalea/simulateur-maprimeadapt/settings/envir
 |---|---|---|
 | `RESEND_API_KEY` | `re_...` | API Key Resend (à régénérer si compromise) |
 | `RESEND_FROM` | `Vivalea Adapt <noreply@notif.vivalea.fr>` | Expéditeur emails |
-| `INTERNAL_EMAIL` | `ctsilefa@vivalea.fr` | Destinataire des notifs lead |
+| `INTERNAL_EMAIL` | `lea@vivalea.fr` | Destinataire des notifs lead |
 
 ⚠️ Après modification d'une variable, **forcer un redeploy** (commit "factice" + push).
 
@@ -103,7 +103,7 @@ Sources : Service-Public.fr · MaPrimeAdapt' 2024 · ANAH
 
 À la soumission du formulaire, 2 emails sont envoyés via `/api/send-email` :
 
-### Email 1 — Interne (vers `ctsilefa@vivalea.fr`)
+### Email 1 — Interne (vers `lea@vivalea.fr`)
 
 - Header magenta avec nom du lead
 - 3 KPIs en tête : Résultat éligibilité / Département / Taille foyer
@@ -130,7 +130,7 @@ Le domaine `notif.vivalea.fr` est partagé avec le simulateur Diagnostic. La con
 | TXT (DKIM) | `resend._domainkey.notif` | `p=MIG...` |
 | MX | `send.notif` | `feedback-smtp.eu-west-1.amazonses.com.` (priorité 10) |
 | TXT (SPF) | `send.notif` | `v=spf1 include:amazonses.com ~all` |
-| TXT (DMARC) | `_dmarc.notif` | `v=DMARC1; p=none; rua=mailto:ctsilefa@vivalea.fr` |
+| TXT (DMARC) | `_dmarc.notif` | `v=DMARC1; p=none; rua=mailto:lea@vivalea.fr` |
 
 ---
 
@@ -240,7 +240,7 @@ Ce projet suit la méthodologie **BMAD** :
 ## 📞 Contacts
 
 - **Project Owner** : Touxah (touxah@vivalea.fr)
-- **Lead notif** : ctsilefa@vivalea.fr
+- **Lead notif** : lea@vivalea.fr
 
 ---
 
