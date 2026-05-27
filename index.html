@@ -13,7 +13,7 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+    body { font-family: 'DM Sans', 'Segoe UI', sans-serif; overflow-x: hidden; }
   </style>
   <script>
     // Auto-resize iframe pour embed Webflow
@@ -24,13 +24,14 @@
           document.documentElement.scrollHeight,
           document.body.offsetHeight,
           document.documentElement.offsetHeight
-        );
+        ) + 20; // buffer pour éviter les scrollbars
         if (window.parent !== window) {
           window.parent.postMessage({ type: 'vivalea-resize', height: height }, '*');
         }
       } catch(e) {}
     }
     window.addEventListener('load', sendHeightToParent);
+    window.addEventListener('resize', sendHeightToParent);
     setInterval(sendHeightToParent, 300);
     if (typeof ResizeObserver !== 'undefined') {
       new ResizeObserver(sendHeightToParent).observe(document.documentElement);
@@ -141,10 +142,9 @@ function getResultMessage(eligibility, data) {
 const styles = {
   wrapper: {
     fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
-    minHeight: "100vh",
     background: "#F8F6F4",
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "center",
     padding: "24px 16px",
   },
