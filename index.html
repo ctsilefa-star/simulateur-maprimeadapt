@@ -17,24 +17,20 @@
   </style>
   <script>
     // Auto-resize iframe pour embed Webflow
-    function sendHeightToParent() {
-      try {
-        const height = Math.max(
-          document.body.scrollHeight,
-          document.documentElement.scrollHeight,
-          document.body.offsetHeight,
-          document.documentElement.offsetHeight
-        ) + 20; // buffer pour éviter les scrollbars
+    var lastHeight = 0;
+    function sendHeightIfChanged() {
+      var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) + 20;
+      if (h !== lastHeight) {
+        lastHeight = h;
         if (window.parent !== window) {
-          window.parent.postMessage({ type: 'vivalea-resize', height: height }, '*');
+          window.parent.postMessage({ type: 'vivalea-resize', height: h }, '*');
         }
-      } catch(e) {}
+      }
     }
-    window.addEventListener('load', sendHeightToParent);
-    window.addEventListener('resize', sendHeightToParent);
-    setInterval(sendHeightToParent, 300);
+    window.addEventListener('load', sendHeightIfChanged);
+    window.addEventListener('resize', sendHeightIfChanged);
     if (typeof ResizeObserver !== 'undefined') {
-      new ResizeObserver(sendHeightToParent).observe(document.documentElement);
+      new ResizeObserver(sendHeightIfChanged).observe(document.documentElement);
     }
   </script>
 </head>
