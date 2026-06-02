@@ -16,21 +16,37 @@
     body { font-family: 'DM Sans', 'Segoe UI', sans-serif; overflow-x: hidden; }
   </style>
   <script>
-    // Auto-resize iframe pour embed Webflow
+    // Auto-resize iframe sécurisé — Attend que la page soit prête
     var lastHeight = 0;
+    
     function sendHeightIfChanged() {
-      var h = document.body.offsetHeight + 30;
-      if (Math.abs(h - lastHeight) > 15) {
+      // On cible en priorité le conteneur React s'il existe, sinon le body
+      var rootEl = document.getElementById('root') || document.body;
+      if (!rootEl) return;
+      
+      // On ajoute 60px pour s'assurer que les boutons du bas respirent bien
+      var h = Math.ceil(rootEl.getBoundingClientRect().height) + 60; 
+
+      if (Math.abs(h - lastHeight) > 12) {
         lastHeight = h;
         if (window.parent !== window) {
           window.parent.postMessage({ type: 'vivalea-resize', height: h }, '*');
         }
       }
     }
+
+    // On attend que la structure de la page soit chargée avant d'observer
+    window.addEventListener('DOMContentLoaded', function() {
+      sendHeightIfChanged();
+      
+      if (typeof ResizeObserver !== 'undefined') {
+        var target = document.getElementById('root') || document.body;
+        new ResizeObserver(sendHeightIfChanged).observe(target);
+      }
+    });
+
+    // Sécurité si des polices ou éléments lourds arrivent après
     window.addEventListener('load', sendHeightIfChanged);
-    if (typeof ResizeObserver !== 'undefined') {
-      new ResizeObserver(sendHeightIfChanged).observe(document.body);
-    }
   </script>
 </head>
 <body>
