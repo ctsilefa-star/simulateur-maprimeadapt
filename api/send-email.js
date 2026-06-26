@@ -1,267 +1,398 @@
-// /api/send-email.js — Vivalea Adapt · Simulateur d'aides Seniors & Handicap
-// Templates harmonisés avec l'identité Vivalea (magenta #8F1349, DM Sans/Serif)
+// /api/send-email.js — Vivalea Adapt · Simulateur d'aides
+// Templates v3 — données JSON structurées, visuels enrichis
 
-const esc = (s) => String(s || "").replace(/[<>&"']/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = (s) => String(s || "").replace(/[<>&"']/g, c =>
+  ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// ── Palette Vivalea ──────────────────────────────────────────
 const C = {
-  magenta: "#8F1349", navy: "#18263F", orange: "#E9552E",
-  green: "#059669", red: "#DC2626", blue: "#3B82F6",
-  bg: "#F8F6F4", border: "#E8E2DD", muted: "#6B7280",
-  white: "#FFFFFF",
+  magenta: "#8F1349", magentaDark: "#6B0D37",
+  navy: "#18263F", navyLight: "#2C3E5A",
+  green: "#059669", greenBg: "#ECFDF5",
+  orange: "#E9552E", orangeBg: "#FFF1E4",
+  blue: "#3B82F6", blueBg: "#EFF6FF",
+  bg: "#F8F6F4", border: "#E8E2DD",
+  muted: "#6B7280", white: "#FFFFFF",
 };
 
-// Badge coloré selon le niveau d'une aide
-const niveauBadge = (niveau) => {
-  const map = {
-    fort:  { c: C.green,   bg: "#ECFDF5", label: "ÉLIGIBLE" },
-    moyen: { c: C.orange,  bg: "#FFF1E4", label: "PROBABLE" },
-    info:  { c: C.blue,    bg: "#EFF6FF", label: "APPLICABLE" },
-    non:   { c: C.muted,   bg: C.bg,      label: "NON ÉLIGIBLE" },
-  };
-  return map[niveau] || map.info;
+// ── Badges niveau ────────────────────────────────────────────
+const NIVEAU = {
+  fort:  { c: C.green,   bg: C.greenBg,  label: "ÉLIGIBLE",    dot: "🟢" },
+  moyen: { c: C.orange,  bg: C.orangeBg, label: "PROBABLE",    dot: "🟠" },
+  info:  { c: C.blue,    bg: C.blueBg,   label: "APPLICABLE",  dot: "🔵" },
+  non:   { c: C.muted,   bg: C.bg,       label: "NON ÉLIGIBLE",dot: "⚫" },
 };
 
-// En-tête commun
-const header = (badge, title, subtitle) => `
-  <div style="background:${C.magenta};color:${C.white};padding:28px 32px;">
-    <div style="font-size:11px;letter-spacing:0.18em;opacity:0.75;text-transform:uppercase;margin-bottom:10px;">${esc(badge)}</div>
-    <div style="font-size:24px;font-weight:700;line-height:1.2;">${esc(title)}</div>
-    ${subtitle ? `<div style="font-size:13px;opacity:0.9;margin-top:6px;">${esc(subtitle)}</div>` : ""}
-  </div>`;
-
-// Section générique
-const section = (title, content, bgColor = "transparent") => `
-  <div style="padding:22px 32px;border-bottom:1px solid ${C.border};${bgColor !== "transparent" ? `background:${bgColor};` : ""}">
-    <div style="font-size:10px;color:${C.magenta};font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:12px;">${esc(title)}</div>
-    ${content}
-  </div>`;
-
-// Ligne de tableau
-const row = (label, value, opts = {}) => `
-  <tr>
-    <td style="color:${C.muted};width:200px;padding:3px 0;vertical-align:top;font-size:13px;">${esc(label)}</td>
-    <td style="padding:3px 0;font-size:13px;${opts.bold ? "font-weight:700;" : ""}${opts.color ? `color:${opts.color};` : ""}">${opts.raw ? value : esc(value || "—")}</td>
-  </tr>`;
-
-const table = (rows) => `<table style="width:100%;line-height:1.6;">${rows}</table>`;
-
-// KPI card
-const kpiCard = (label, value, color) => `
-  <div style="flex:1;background:${C.white};padding:14px 12px;border-radius:10px;border:1px solid ${C.border};text-align:center;">
-    <div style="font-size:10px;color:${C.muted};margin-bottom:5px;">${esc(label)}</div>
-    <div style="font-size:16px;font-weight:700;color:${color};line-height:1.3;">${esc(value)}</div>
-  </div>`;
-
-// Sources officielles des aides (liens cliquables pour le vendeur)
-const AIDE_SOURCES = {
-  "MaPrimeAdapt'":       "https://www.anah.fr/maprimeadapt",
-  "APA":                 "https://www.service-public.fr/particuliers/vosdroits/F10009",
-  "PCH":                 "https://www.service-public.fr/particuliers/vosdroits/F14202",
-  "Crédit d'impôt":      "https://www.impots.gouv.fr/particulier/questions/puis-je-beneficier-dun-credit-dimpot-pour-lachat-dequipements-speciaux",
-  "TVA":                 "https://www.service-public.fr/particuliers/vosdroits/F12219",
-  "CARSAT":              "https://www.carsat.fr/les-services-en-ligne/particuliers/ma-demande-d-aide-pour-adaptation-du-logement",
-  "Action Logement":     "https://www.actionlogement.fr/l-aide-travaux-d-adaptation-du-logement-au-handicap",
-  "Aides locales":       "https://www.anah.fr/proprietaires/vos-aides/les-aides-de-votre-collectivite/",
+const badge = (niveau) => {
+  const n = NIVEAU[niveau] || NIVEAU.info;
+  return `<span style="display:inline-block;font-size:9px;font-weight:800;letter-spacing:0.1em;
+    background:${n.bg};color:${n.c};padding:3px 7px;border-radius:4px;
+    text-transform:uppercase;border:1px solid ${n.c}30;">${n.label}</span>`;
 };
 
-function getAideSource(nom) {
-  if (nom.includes("MaPrime"))         return AIDE_SOURCES["MaPrimeAdapt'"];
-  if (nom.includes("APA"))             return AIDE_SOURCES["APA"];
-  if (nom.includes("PCH"))             return AIDE_SOURCES["PCH"];
-  if (nom.includes("Crédit"))          return AIDE_SOURCES["Crédit d'impôt"];
-  if (nom.includes("TVA"))             return AIDE_SOURCES["TVA"];
-  if (nom.includes("CARSAT"))          return AIDE_SOURCES["CARSAT"];
-  if (nom.includes("Action Logement")) return AIDE_SOURCES["Action Logement"];
-  if (nom.includes("locale") || nom.includes("territorial")) return AIDE_SOURCES["Aides locales"];
+// ── Liens sources ────────────────────────────────────────────
+const SOURCES = {
+  maprimeadapt:    "https://www.anah.fr/maprimeadapt",
+  apa:             "https://www.service-public.fr/particuliers/vosdroits/F10009",
+  pch:             "https://www.service-public.fr/particuliers/vosdroits/F14202",
+  credit_impot:    "https://www.impots.gouv.fr/particulier/questions/puis-je-beneficier-dun-credit-dimpot-pour-lachat-dequipements-speciaux",
+  carsat:          "https://www.carsat.fr",
+  ardh:            "https://www.cnav.fr/content/aide-retour-a-domicile-apres-hospitalisation",
+  aah:             "https://www.service-public.fr/particuliers/vosdroits/F12242",
+  ajpa:            "https://www.service-public.fr/particuliers/vosdroits/F35494",
+  action_logement: "https://www.actionlogement.fr/l-aide-travaux-d-adaptation-du-logement-au-handicap",
+  aides_locales:   "https://www.anah.fr/proprietaires/vos-aides/les-aides-de-votre-collectivite/",
+};
+
+function getSource(nom) {
+  const n = nom.toLowerCase();
+  if (n.includes("maprime"))        return SOURCES.maprimeadapt;
+  if (n.includes("apa"))            return SOURCES.apa;
+  if (n.includes("pch"))            return SOURCES.pch;
+  if (n.includes("crédit d'impôt") || n.includes("credit")) return SOURCES.credit_impot;
+  if (n.includes("carsat") || n.includes("cnav")) return SOURCES.carsat;
+  if (n.includes("ardh"))           return SOURCES.ardh;
+  if (n.includes("aah"))            return SOURCES.aah;
+  if (n.includes("ajpa"))           return SOURCES.ajpa;
+  if (n.includes("action logement")) return SOURCES.action_logement;
+  if (n.includes("locale") || n.includes("territorial")) return SOURCES.aides_locales;
   return null;
 }
 
-// Carte d'aide pour l'email (interne : avec lien source cliquable)
-const aideRow = (nom, organisme, montantLabel, niveau, forInternal = false) => {
-  const cfg = niveauBadge(niveau);
-  const source = forInternal ? getAideSource(nom) : null;
-  const nomHtml = source
-    ? `<a href="${source}" target="_blank" style="color:${C.navy};text-decoration:underline;font-weight:700;">${esc(nom)} ↗</a>`
-    : `<strong style="font-size:13px;color:${C.navy};">${esc(nom)}</strong>`;
-  return `
-  <tr>
-    <td style="padding:8px 0;border-bottom:1px solid ${C.border};vertical-align:top;">
-      <span style="display:inline-block;font-size:9px;font-weight:700;letter-spacing:0.08em;background:${cfg.bg};color:${cfg.c};padding:2px 6px;border-radius:3px;margin-right:6px;">${cfg.label}</span>
-      ${nomHtml}
-      ${organisme ? `<span style="font-size:11px;color:${C.muted};margin-left:4px;">· ${esc(organisme)}</span>` : ""}
-    </td>
-    <td style="padding:8px 0 8px 12px;border-bottom:1px solid ${C.border};text-align:right;white-space:nowrap;font-size:12px;font-weight:700;color:${cfg.c};vertical-align:top;">${esc(montantLabel)}</td>
-  </tr>`;
-};
+// ── Composants HTML réutilisables ────────────────────────────
+const divider = () => `<div style="height:1px;background:${C.border};margin:0;"></div>`;
 
-// Footer
-const footer = (subline) => `
-  <div style="padding:18px 32px;background:${C.navy};color:${C.white};text-align:center;font-size:11px;line-height:1.6;">
-    <div style="opacity:0.95;font-weight:600;letter-spacing:0.05em;">Vivalea · Entreprise à impact et ESS</div>
-    <div style="opacity:0.7;margin-top:4px;">${esc(subline)}</div>
+const sectionTitle = (text, color = C.magenta) =>
+  `<div style="font-size:10px;font-weight:800;color:${color};text-transform:uppercase;
+    letter-spacing:0.14em;margin-bottom:14px;padding-bottom:8px;
+    border-bottom:2px solid ${color}20;">${esc(text)}</div>`;
+
+const infoRow = (label, value, opts = {}) => `
+  <div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid ${C.border}10;">
+    <span style="font-size:12px;color:${C.muted};min-width:190px;flex-shrink:0;">${esc(label)}</span>
+    <span style="font-size:13px;color:${C.navy};font-weight:${opts.bold ? "700" : "500"};
+      ${opts.color ? `color:${opts.color};` : ""}">${opts.raw ? value : esc(value || "—")}</span>
   </div>`;
 
-// ── Parsing de la liste d'aides (pipe-séparée) ──────────────
-// Format : "Nom (montant) | Nom (montant) | ..."
-function parseAidesList(str) {
-  if (!str) return [];
-  return str.split("|").map(s => s.trim()).filter(Boolean).map(item => {
-    const match = item.match(/^(.+?)\s*\(([^)]+)\)$/);
-    if (match) return { nom: match[1].trim(), montant: match[2].trim() };
-    return { nom: item, montant: "" };
-  });
-}
+// ── Carte aide (email interne avec lien source) ──────────────
+const aideCard = (aide, withLink = false) => {
+  const src = withLink ? getSource(aide.nom) : null;
+  const nomHtml = src
+    ? `<a href="${src}" target="_blank" style="color:${C.navy};font-weight:700;font-size:13px;text-decoration:none;">${esc(aide.nom)} <span style="font-size:10px;color:${C.magenta};">↗</span></a>`
+    : `<span style="color:${C.navy};font-weight:700;font-size:13px;">${esc(aide.nom)}</span>`;
+  const orga = aide.organisme
+    ? `<span style="font-size:11px;color:${C.muted};"> · ${esc(aide.organisme)}</span>` : "";
+  const montant = aide.montantLabel
+    ? `<div style="font-size:12px;font-weight:700;color:${NIVEAU[aide.niveau]?.c || C.muted};
+        white-space:nowrap;margin-top:2px;">${esc(aide.montantLabel)}</div>` : "";
 
-// Niveaux correspondants aux aides connues (pour coloration)
-const AIDE_NIVEAUX = {
-  "MaPrimeAdapt'": "fort",
-  "APA — Volet adaptation du logement": "fort",
-  "PCH — Aménagement du logement": "fort",
-  "PCH — Maintien des droits après 60 ans": "moyen",
-  "Crédit d'impôt adaptation": "moyen",
-  "CARSAT / Caisse de retraite": "moyen",
-  "Aide CARSAT / Caisse de retraite": "moyen",
-  "TVA à taux réduit — 5,5 %": "info",
-  "Prêt Action Logement — 0 %": "info",
-  "Aides locales & territoriales": "info",
+  return `
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+    padding:11px 0;border-bottom:1px solid ${C.border};">
+    <div style="flex:1;min-width:0;">
+      <div style="margin-bottom:4px;">${badge(aide.niveau)} ${nomHtml}${orga}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0;">${montant}</div>
+  </div>`;
 };
 
-function getNiveau(nom) {
-  for (const [key, val] of Object.entries(AIDE_NIVEAUX)) {
-    if (nom.includes(key) || key.includes(nom.substring(0, 15))) return val;
-  }
-  if (nom.includes("MaPrime")) return nom.includes("Non") ? "non" : "fort";
-  return "info";
-}
+// ── Groupe de cartes par catégorie ───────────────────────────
+const aideSection = (label, icon, color, aides, withLink = false) => {
+  if (!aides || aides.length === 0) return "";
+  return `
+  <div style="margin-bottom:20px;">
+    <div style="font-size:10px;font-weight:800;color:${color};text-transform:uppercase;
+      letter-spacing:0.12em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+      <span>${icon}</span> ${esc(label)}
+    </div>
+    <div>${aides.map(a => aideCard(a, withLink)).join("")}</div>
+  </div>`;
+};
 
-// ── EMAIL INTERNE ────────────────────────────────────────────
+// ── EMAIL INTERNE VIVALEA ────────────────────────────────────
 function buildInternalEmail(d) {
-  const aides = parseAidesList(d.sim_aides);
-  const nbAides = d.sim_nb_aides || String(aides.length);
-  const montantTotal = d.sim_montant_total || "À estimer";
+  let aides = [];
+  try { aides = JSON.parse(d.sim_aides_json || "[]"); } catch(e) {}
 
-  const aidesTableRows = aides.length > 0
-    ? `<table style="width:100%;">${aides.map(a => aideRow(a.nom, "", a.montant, getNiveau(a.nom), true)).join("")}</table>`
-    : `<p style="font-size:13px;color:${C.muted};">Aucune aide identifiée.</p>`;
+  const aidesFort  = aides.filter(a => a.niveau === "fort");
+  const aidesProb  = aides.filter(a => a.niveau === "moyen");
+  const aidesInfo  = aides.filter(a => a.niveau === "info");
+  const nbElig     = aidesFort.length + aidesProb.length;
+  const isPartner  = d.partenaire === "oui";
 
-  const partenaireSection = d.partenaire === "oui"
-    ? section("Recommandation partenaire", table(
-        row("Entreprise partenaire", d.partenaire_entreprise, { bold: true }) +
-        row("Contact partenaire", d.partenaire_nom)
-      ), "#FFF1F4")
-    : "";
+  const logement  = aides.filter(a => a.categorie === "logement");
+  const services  = aides.filter(a => a.categorie === "services");
+  const complem   = aides.filter(a => a.categorie === "complementaire");
+
+  const hasPrecisions = [d.prec_ergo_rapport, d.prec_chute_hospi, d.prec_aidant]
+    .some(v => v && v !== "—");
 
   return `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"><title>Nouveau lead Vivalea Adapt</title></head>
-<body style="margin:0;padding:0;font-family:'Helvetica Neue',Arial,sans-serif;background:${C.bg};color:${C.navy};">
-<div style="max-width:640px;margin:0 auto;background:${C.white};">
-  ${header(
-    d.partenaire === "oui"
-      ? `Recommandation partenaire · ${esc(d.partenaire_entreprise)}`
-      : "Nouveau lead · Simulateur Aides Seniors & Handicap",
-    d.lead_nom,
-    `Dépt. ${d.sim_departement} · ${d.sim_age}`
-  )}
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lead Vivalea — ${esc(d.lead_nom)}</title></head>
+<body style="margin:0;padding:24px 16px;font-family:'Helvetica Neue',Arial,sans-serif;
+  background:${C.bg};color:${C.navy};">
 
-  <div style="padding:20px 32px;border-bottom:1px solid ${C.border};background:${C.bg};">
-    <div style="display:flex;gap:10px;">
-      ${kpiCard("Potentiel aides", montantTotal, C.magenta)}
-      ${kpiCard("Nb subventions", `${nbAides} aide${Number(nbAides) > 1 ? "s" : ""}`, C.green)}
-      ${kpiCard("Département", d.sim_departement, C.navy)}
+<div style="max-width:640px;margin:0 auto;background:${C.white};border-radius:14px;
+  overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+
+  <!-- HEADER -->
+  <div style="background:linear-gradient(135deg,${C.magenta} 0%,${C.magentaDark} 100%);
+    padding:28px 32px;">
+    <div style="font-size:10px;letter-spacing:0.18em;opacity:0.75;text-transform:uppercase;
+      margin-bottom:8px;">
+      ${isPartner
+        ? `🤝 Recommandation partenaire · ${esc(d.partenaire_entreprise)}`
+        : "🔔 Nouveau lead · Simulateur Vivalea Adapt"}
+    </div>
+    <div style="font-size:26px;font-weight:800;color:${C.white};line-height:1.15;margin-bottom:4px;">
+      ${esc(d.lead_nom)}
+    </div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.85);">
+      Dépt. ${esc(d.sim_departement)} · ${esc(d.sim_age)} · ${esc(d.sim_situation)}
     </div>
   </div>
 
-  ${partenaireSection}
+  <!-- KPIs -->
+  <div style="background:${C.bg};padding:18px 32px;border-bottom:1px solid ${C.border};">
+    <table style="width:100%;border-spacing:8px 0;"><tr>
+      <td style="background:${C.white};border-radius:10px;padding:14px 16px;
+        border:1px solid ${C.border};text-align:center;width:33%;">
+        <div style="font-size:9px;color:${C.muted};text-transform:uppercase;
+          letter-spacing:0.1em;margin-bottom:6px;">🏠 Aides logement</div>
+        <div style="font-size:17px;font-weight:800;color:${C.magenta};line-height:1.1;">
+          ${d.sim_total_logement || "—"}</div>
+      </td>
+      <td style="background:${C.white};border-radius:10px;padding:14px 16px;
+        border:1px solid ${C.border};text-align:center;width:33%;">
+        <div style="font-size:9px;color:${C.muted};text-transform:uppercase;
+          letter-spacing:0.1em;margin-bottom:6px;">✅ Éligibles / probables</div>
+        <div style="font-size:17px;font-weight:800;color:${C.green};line-height:1.1;">
+          ${nbElig} aide${nbElig > 1 ? "s" : ""}</div>
+      </td>
+      <td style="background:${C.white};border-radius:10px;padding:14px 16px;
+        border:1px solid ${C.border};text-align:center;width:33%;">
+        <div style="font-size:9px;color:${C.muted};text-transform:uppercase;
+          letter-spacing:0.1em;margin-bottom:6px;">📋 Objectif</div>
+        <div style="font-size:13px;font-weight:700;color:${C.navy};line-height:1.2;">
+          ${esc(d.sim_objectif)}</div>
+      </td>
+    </tr></table>
+  </div>
 
-  ${section("Coordonnées", table(
-    row("Nom", d.lead_nom, { bold: true }) +
-    row("Téléphone", `<a href="tel:${esc(d.lead_telephone)}" style="color:${C.magenta};text-decoration:none;font-weight:700;">${esc(d.lead_telephone)}</a>`, { raw: true }) +
-    row("Email", `<a href="mailto:${esc(d.lead_email)}" style="color:${C.magenta};text-decoration:none;">${esc(d.lead_email)}</a>`, { raw: true }) +
-    row("Source", d.lead_source)
-  ))}
+  <!-- COORDONNÉES -->
+  <div style="padding:22px 32px;border-bottom:1px solid ${C.border};">
+    ${sectionTitle("📞 Coordonnées")}
+    ${infoRow("Nom", d.lead_nom, { bold: true })}
+    ${infoRow("Téléphone",
+      `<a href="tel:${esc(d.lead_telephone)}" style="color:${C.magenta};font-weight:700;
+        text-decoration:none;font-size:15px;">${esc(d.lead_telephone)}</a>`, { raw: true })}
+    ${infoRow("Email",
+      `<a href="mailto:${esc(d.lead_email)}" style="color:${C.magenta};text-decoration:none;">
+        ${esc(d.lead_email)}</a>`, { raw: true })}
+    ${infoRow("Source", d.lead_source)}
+    ${isPartner ? infoRow("Partenaire", `${esc(d.partenaire_entreprise)} · Contact : ${esc(d.partenaire_nom)}`, { bold: true, color: C.magenta }) : ""}
+  </div>
 
-  ${section("Profil de la simulation", table(
-    row("Âge", d.sim_age, { bold: true }) +
-    row("Situation autonomie/handicap", d.sim_situation) +
-    row("Statut logement", d.sim_statut) +
-    row("Département", d.sim_departement) +
-    row("Personnes au foyer", d.sim_occupants) +
-    row("Revenus fiscaux de référence", d.sim_revenus) +
-    row("Statut professionnel", d.sim_profil)
-  ))}
+  <!-- PROFIL -->
+  <div style="padding:22px 32px;border-bottom:1px solid ${C.border};background:${C.bg};">
+    ${sectionTitle("👤 Profil de simulation", C.navyLight)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+      ${infoRow("Âge", d.sim_age, { bold: true })}
+      ${infoRow("Situation autonomie", d.sim_situation)}
+      ${infoRow("Statut logement", d.sim_statut)}
+      ${infoRow("Département", d.sim_departement)}
+      ${infoRow("Personnes au foyer", d.sim_occupants + " personne(s)")}
+      ${infoRow("Revenus fiscaux de réf.", d.sim_revenus)}
+      ${infoRow("Statut professionnel", d.sim_profil)}
+      ${infoRow("Éligibilité MaPrimeAdapt'", d.sim_eligibilite, { bold: true })}
+    </div>
+  </div>
 
-  ${(d.prec_ergo_rapport && d.prec_ergo_rapport !== "—") || (d.prec_chute_hospi && d.prec_chute_hospi !== "—") || (d.prec_aidant && d.prec_aidant !== "—") ? section("Précisions situation (facultatif)", table(
-    row("Rapport ergothérapeute < 6 mois", d.prec_ergo_rapport || "—") +
-    row("Chute avec hospitalisation (6 mois)", d.prec_chute_hospi || "—") +
-    row("Aidé au quotidien", d.prec_aidant || "—")
-  )) : ""}
+  ${hasPrecisions ? `
+  <!-- PRÉCISIONS -->
+  <div style="padding:20px 32px;border-bottom:1px solid ${C.border};">
+    ${sectionTitle("🔍 Précisions situation", C.orange)}
+    ${infoRow("Rapport ergo < 6 mois", d.prec_ergo_rapport)}
+    ${infoRow("Chute avec hospitalisation", d.prec_chute_hospi)}
+    ${infoRow("Aidé au quotidien (proche/pro)", d.prec_aidant)}
+  </div>` : ""}
 
-  ${section("Aides identifiées", aidesTableRows)}
+  <!-- AIDES IDENTIFIÉES -->
+  <div style="padding:22px 32px;">
+    ${sectionTitle("💡 Aides identifiées (${aides.length} au total)")}
+    ${aideSection("Adaptation du logement", "🏠", C.magenta, logement, true)}
+    ${aideSection("Services & aide à domicile", "🤝", C.green, services, true)}
+    ${aideSection("Aides complémentaires", "💼", C.muted, complem, true)}
+    ${aides.length === 0 ? `<p style="font-size:13px;color:${C.muted};">Aucune aide identifiée.</p>` : ""}
+  </div>
 
-  ${footer(`Lead capturé le ${esc(d.timestamp)}`)}
+  <!-- FOOTER -->
+  <div style="padding:18px 32px;background:${C.navy};text-align:center;">
+    <div style="color:${C.white};font-size:12px;font-weight:600;letter-spacing:0.06em;">
+      Vivalea · Entreprise à impact et ESS
+    </div>
+    <div style="color:rgba(255,255,255,0.55);font-size:11px;margin-top:4px;">
+      Lead capturé le ${esc(d.timestamp)}
+    </div>
+  </div>
+
 </div>
 </body></html>`;
 }
 
-// ── EMAIL PROSPECT ───────────────────────────────────────────
+// ── EMAIL PROSPECT (CLIENT) ──────────────────────────────────
 function buildProspectEmail(d) {
-  const aides = parseAidesList(d.sim_aides);
-  const montantTotal = d.sim_montant_total || "Aides disponibles";
-  const nbAides = d.sim_nb_aides || String(aides.length);
-  const hasAides = Number(nbAides) > 0;
+  let aides = [];
+  try { aides = JSON.parse(d.sim_aides_json || "[]"); } catch(e) {}
 
-  const messageIntro = hasAides
-    ? `Selon les informations renseignées, nous avons identifié <strong>${nbAides} aide${Number(nbAides) > 1 ? "s" : ""} potentielle${Number(nbAides) > 1 ? "s" : ""}</strong> pour financer l'adaptation de votre logement, pour un montant estimatif de <strong>${esc(montantTotal)}</strong>. Ces montants sont cumulables selon votre situation.`
-    : `Selon les informations renseignées, la situation actuelle ne permet pas d'identifier d'aides directes. Mais d'autres dispositifs peuvent exister selon votre territoire.`;
+  const aidesFort = aides.filter(a => a.niveau === "fort");
+  const aidesProb = aides.filter(a => a.niveau === "moyen");
+  const nbElig    = aidesFort.length + aidesProb.length;
+  const hasTotal  = !!d.sim_total_logement;
 
-  const aidesTableRows = aides.length > 0
-    ? `<table style="width:100%;">${aides.map(a => aideRow(a.nom, "", a.montant, getNiveau(a.nom))).join("")}</table>`
-    : "";
+  const logement  = aides.filter(a => a.categorie === "logement");
+  const services  = aides.filter(a => a.categorie === "services");
+  const complem   = aides.filter(a => a.categorie === "complementaire");
+
+  const mpaElig = d.sim_eligibilite && !d.sim_eligibilite.startsWith("Non");
+
+  const introText = nbElig > 0
+    ? `Votre simulation fait apparaître <strong style="color:${C.magenta};">${nbElig} aide${nbElig > 1 ? "s" : ""} éligible${nbElig > 1 ? "s" : ""} ou probables</strong>.
+       ${hasTotal ? `Le potentiel de subventions pour l'adaptation de votre logement est estimé à <strong style="color:${C.magenta};">${esc(d.sim_total_logement)}</strong>.` : ""}
+       Ces montants sont cumulables selon votre situation personnelle.`
+    : `Votre simulation ne fait pas ressortir d'aides directes dans votre situation actuelle.
+       D'autres dispositifs locaux peuvent toutefois exister — un conseiller Vivalea peut vous aider à les identifier.`;
 
   return `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"><title>Votre bilan d'aides — Vivalea Adapt</title></head>
-<body style="margin:0;padding:0;font-family:'Helvetica Neue',Arial,sans-serif;background:${C.bg};color:${C.navy};">
-<div style="max-width:640px;margin:0 auto;background:${C.white};">
-  ${header("Votre bilan d'aides personnalisé", "Vivalea Adapt", `Merci ${d.lead_nom}, voici vos résultats`)}
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Votre bilan d'aides — Vivalea Adapt</title></head>
+<body style="margin:0;padding:24px 16px;font-family:'Helvetica Neue',Arial,sans-serif;
+  background:${C.bg};color:${C.navy};">
 
-  <div style="padding:24px 32px;border-bottom:1px solid ${C.border};background:linear-gradient(135deg,#8F1349,#6B0D37);text-align:center;">
-    <div style="font-size:10px;color:rgba(255,255,255,0.75);font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px;">Potentiel d'aides estimatif</div>
-    <div style="font-size:28px;font-weight:800;color:#FFFFFF;line-height:1;">${esc(montantTotal)}</div>
-    <div style="font-size:11px;color:rgba(255,255,255,0.65);margin-top:6px;">${nbAides} aide${Number(nbAides) > 1 ? "s" : ""} identifiée${Number(nbAides) > 1 ? "s" : ""} · estimation indicative, non contractuelle</div>
-  </div>
+<div style="max-width:600px;margin:0 auto;background:${C.white};border-radius:14px;
+  overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
-  <div style="padding:24px 32px;font-size:14px;line-height:1.7;color:${C.navy};border-bottom:1px solid ${C.border};">
-    <p style="margin:0 0 12px;">Bonjour ${esc(d.lead_nom)},</p>
-    <p style="margin:0;">${messageIntro}</p>
-  </div>
-
-  ${aidesTableRows ? section("Détail des aides identifiées", aidesTableRows, C.bg) : ""}
-
-  ${section("Récapitulatif de votre saisie", table(
-    row("Âge", d.sim_age, { bold: true }) +
-    row("Situation", d.sim_situation) +
-    row("Statut logement", d.sim_statut) +
-    row("Département", d.sim_departement) +
-    row("Personnes au foyer", `${esc(d.sim_occupants)} personne(s)`) +
-    row("Revenus de référence", d.sim_revenus) +
-    row("Situation professionnelle", d.sim_profil)
-  ))}
-
-  <div style="padding:24px 32px;border-bottom:1px solid ${C.border};background:${C.bg};">
-    <div style="font-size:10px;color:${C.magenta};font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:10px;">Prochaine étape</div>
-    <p style="font-size:14px;line-height:1.7;margin:0 0 16px;">Un conseiller Vivalea vous accompagne gratuitement pour monter votre dossier d'aides et maximiser votre financement, sans démarche administrative à faire seul.</p>
-    <div style="text-align:center;">
-      <a href="https://calendly.com/vivalea" style="display:inline-block;background:${C.magenta};color:${C.white};padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px;">Échanger avec un conseiller →</a>
-      <div style="font-size:11px;color:${C.muted};margin-top:8px;">30 min · Gratuit · Sans engagement</div>
+  <!-- HEADER -->
+  <div style="background:linear-gradient(135deg,${C.magenta} 0%,${C.magentaDark} 100%);
+    padding:32px 32px 28px;">
+    <div style="font-size:10px;letter-spacing:0.18em;opacity:0.75;text-transform:uppercase;
+      margin-bottom:10px;">Vivalea Adapt · Votre bilan personnalisé</div>
+    <div style="font-size:24px;font-weight:800;color:${C.white};line-height:1.2;margin-bottom:6px;">
+      Bonjour ${esc((d.lead_nom || "").split(" ")[0])} 👋
+    </div>
+    <div style="font-size:14px;color:rgba(255,255,255,0.88);">
+      Voici le récapitulatif de vos aides potentielles pour le maintien à domicile.
     </div>
   </div>
 
-  <div style="padding:16px 32px 24px;font-size:13px;line-height:1.7;color:${C.muted};">
-    À très bientôt,<br/>
-    <strong style="color:${C.navy};">L'équipe Vivalea Adapt</strong>
+  ${hasTotal ? `
+  <!-- MONTANT HERO -->
+  <div style="background:${C.bg};padding:24px 32px;text-align:center;border-bottom:1px solid ${C.border};">
+    <div style="font-size:10px;color:${C.muted};text-transform:uppercase;letter-spacing:0.12em;
+      margin-bottom:8px;">Potentiel d'aides logement estimé</div>
+    <div style="font-size:36px;font-weight:800;color:${C.magenta};line-height:1;margin-bottom:6px;">
+      ${esc(d.sim_total_logement)}</div>
+    <div style="font-size:11px;color:${C.muted};">
+      Estimation indicative · Non contractuel · ${nbElig} aide${nbElig > 1 ? "s" : ""} éligible${nbElig > 1 ? "s" : ""} ou probable${nbElig > 1 ? "s" : ""}
+    </div>
+  </div>` : ""}
+
+  <!-- INTRO -->
+  <div style="padding:24px 32px;border-bottom:1px solid ${C.border};
+    font-size:14px;line-height:1.75;color:${C.navy};">
+    <p style="margin:0 0 10px;">Bonjour ${esc(d.lead_nom)},</p>
+    <p style="margin:0;">${introText}</p>
   </div>
 
-  ${footer("Simulation indicative, non contractuelle · Données traitées de manière confidentielle")}
+  ${logement.length > 0 ? `
+  <!-- AIDES LOGEMENT -->
+  <div style="padding:22px 32px;border-bottom:1px solid ${C.border};">
+    <div style="font-size:10px;font-weight:800;color:${C.magenta};text-transform:uppercase;
+      letter-spacing:0.14em;margin-bottom:14px;padding-bottom:8px;
+      border-bottom:2px solid ${C.magenta}25;">🏠 Adaptation du logement</div>
+    ${logement.map(a => aideCard(a, false)).join("")}
+  </div>` : ""}
+
+  ${services.length > 0 ? `
+  <!-- AIDES SERVICES -->
+  <div style="padding:22px 32px;border-bottom:1px solid ${C.border};">
+    <div style="font-size:10px;font-weight:800;color:${C.green};text-transform:uppercase;
+      letter-spacing:0.14em;margin-bottom:14px;padding-bottom:8px;
+      border-bottom:2px solid ${C.green}30;">🤝 Services & aide à domicile</div>
+    ${services.map(a => aideCard(a, false)).join("")}
+  </div>` : ""}
+
+  ${complem.length > 0 ? `
+  <!-- AIDES COMPLÉMENTAIRES -->
+  <div style="padding:22px 32px;border-bottom:1px solid ${C.border};">
+    <div style="font-size:10px;font-weight:800;color:${C.muted};text-transform:uppercase;
+      letter-spacing:0.14em;margin-bottom:14px;padding-bottom:8px;
+      border-bottom:2px solid ${C.muted}30;">💼 Aides complémentaires</div>
+    ${complem.map(a => aideCard(a, false)).join("")}
+  </div>` : ""}
+
+  <!-- RÉCAPITULATIF PROFIL -->
+  <div style="padding:22px 32px;background:${C.bg};border-bottom:1px solid ${C.border};">
+    <div style="font-size:10px;font-weight:800;color:${C.navyLight};text-transform:uppercase;
+      letter-spacing:0.14em;margin-bottom:12px;">📋 Votre profil renseigné</div>
+    <table style="width:100%;border-spacing:0;">
+      <tr><td style="font-size:12px;color:${C.muted};padding:4px 0;width:50%;">Âge</td>
+        <td style="font-size:12px;font-weight:600;color:${C.navy};padding:4px 0;">${esc(d.sim_age)}</td></tr>
+      <tr><td style="font-size:12px;color:${C.muted};padding:4px 0;">Situation</td>
+        <td style="font-size:12px;font-weight:600;color:${C.navy};padding:4px 0;">${esc(d.sim_situation)}</td></tr>
+      <tr><td style="font-size:12px;color:${C.muted};padding:4px 0;">Logement</td>
+        <td style="font-size:12px;font-weight:600;color:${C.navy};padding:4px 0;">${esc(d.sim_statut)}</td></tr>
+      <tr><td style="font-size:12px;color:${C.muted};padding:4px 0;">Département</td>
+        <td style="font-size:12px;font-weight:600;color:${C.navy};padding:4px 0;">${esc(d.sim_departement)}</td></tr>
+      <tr><td style="font-size:12px;color:${C.muted};padding:4px 0;">Revenus de référence</td>
+        <td style="font-size:12px;font-weight:600;color:${C.navy};padding:4px 0;">${esc(d.sim_revenus)}</td></tr>
+    </table>
+  </div>
+
+  <!-- CTA -->
+  <div style="padding:28px 32px;border-bottom:1px solid ${C.border};">
+    <div style="font-size:10px;font-weight:800;color:${C.magenta};text-transform:uppercase;
+      letter-spacing:0.14em;margin-bottom:12px;">📅 Prochaine étape</div>
+    <p style="font-size:14px;line-height:1.75;color:${C.navy};margin:0 0 20px;">
+      Un conseiller Vivalea vous accompagne <strong>gratuitement</strong> pour monter votre dossier,
+      maximiser vos financements et trouver des artisans qualifiés près de chez vous —
+      sans démarche administrative à faire seul.
+    </p>
+    <div style="text-align:center;">
+      <a href="tel:${esc(d.to_email ? "" : "")}"
+        style="display:inline-block;background:${C.magenta};color:${C.white};
+          padding:15px 32px;border-radius:10px;text-decoration:none;
+          font-weight:700;font-size:15px;letter-spacing:0.02em;">
+        Être rappelé par un conseiller →
+      </a>
+      <div style="font-size:11px;color:${C.muted};margin-top:10px;">
+        Gratuit · Sans engagement · Réponse sous 48 h
+      </div>
+    </div>
+  </div>
+
+  <!-- SIGNATURE -->
+  <div style="padding:20px 32px 24px;">
+    <p style="font-size:13px;color:${C.muted};line-height:1.7;margin:0;">
+      À très bientôt,<br/>
+      <strong style="color:${C.navy};font-size:14px;">L'équipe Vivalea Adapt</strong>
+    </p>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="padding:16px 32px;background:${C.navy};text-align:center;">
+    <div style="color:${C.white};font-size:12px;font-weight:600;letter-spacing:0.06em;">
+      Vivalea · Entreprise à impact et ESS
+    </div>
+    <div style="color:rgba(255,255,255,0.5);font-size:10px;margin-top:4px;line-height:1.6;">
+      Simulation indicative, non contractuelle · Données traitées conformément au RGPD<br/>
+      Aucune transmission à des tiers
+    </div>
+  </div>
+
 </div>
 </body></html>`;
 }
@@ -272,15 +403,16 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")   return res.status(405).json({ error: "Method not allowed" });
 
   const data = req.body;
-  if (!data || !data.lead_email || !data.lead_nom) return res.status(400).json({ error: "Missing required fields" });
+  if (!data || !data.lead_email || !data.lead_nom)
+    return res.status(400).json({ error: "Missing required fields" });
 
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
   if (!RESEND_API_KEY) return res.status(500).json({ error: "RESEND_API_KEY not configured" });
 
-  const FROM       = process.env.RESEND_FROM || "Vivalea Adapt <noreply@notif.vivalea.fr>";
+  const FROM        = process.env.RESEND_FROM    || "Vivalea Adapt <noreply@notif.vivalea.fr>";
   const INTERNAL_TO = process.env.INTERNAL_EMAIL || "lea@vivalea.fr";
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -292,40 +424,41 @@ export default async function handler(req, res) {
       body: JSON.stringify(payload),
     });
     const result = await resp.json();
-    console.log(`[${label}] status=${resp.status} result=${JSON.stringify(result)}`);
+    console.log(`[${label}] status=${resp.status}`, JSON.stringify(result));
     return { ok: resp.ok, status: resp.status, result };
   }
 
   try {
-    // 1. Email interne
+    // 1. Email interne Vivalea
+    const nbEligStr = data.sim_nb_aides || "?";
     const internal = await sendEmail({
       from: FROM, to: [INTERNAL_TO], reply_to: data.lead_email,
-      subject: `Nouveau lead Aides Seniors — ${data.lead_nom} · ${data.sim_montant_total || "aides identifiées"}`,
+      subject: data.partenaire === "oui"
+        ? `[Partenaire] ${data.lead_nom} · ${data.partenaire_entreprise} · ${nbEligStr} aides`
+        : `[Lead] ${data.lead_nom} · Dépt. ${data.sim_departement} · ${nbEligStr} aides · ${data.sim_total_logement || ""}`,
       html: buildInternalEmail(data),
     }, "INTERNAL");
 
-    if (!internal.ok) {
+    if (!internal.ok)
       return res.status(500).json({ error: "Internal email failed", details: internal.result });
-    }
 
-    // Délai rate-limit Resend (2 req/sec en gratuit)
     await sleep(700);
 
-    // 2. Email prospect
+    // 2. Email prospect (client)
     const prospect = await sendEmail({
       from: FROM, to: [data.lead_email], reply_to: INTERNAL_TO,
       subject: `Votre bilan d'aides personnalisé — Vivalea Adapt`,
       html: buildProspectEmail(data),
     }, "PROSPECT");
 
-    if (!prospect.ok) {
+    if (!prospect.ok)
       return res.status(207).json({
         ok: true, internalSent: true, prospectFailed: true,
-        prospectError: prospect.result, internalId: internal.result.id,
+        prospectError: prospect.result,
       });
-    }
 
     return res.status(200).json({ ok: true, internalId: internal.result.id, prospectId: prospect.result.id });
+
   } catch (err) {
     console.error("Send error:", err.message, err.stack);
     return res.status(500).json({ error: err.message });
