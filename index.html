@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simulateur d'aides — Seniors &amp; Handicap · Vivalea</title>
+  <title>Simulateur d'aides — Maintien à domicile · Vivalea</title>
   <meta name="description" content="Découvrez toutes vos aides pour adapter votre logement : MaPrimeAdapt', APA, PCH, crédit d'impôt, CARSAT… Simulation gratuite par Vivalea.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -57,29 +57,50 @@ const { useState, useEffect, useRef } = React;
 // ── CONSTANTS ────────────────────────────────────────────────
 
 const STEPS = [
-  { id: "age",         label: "Âge" },
-  { id: "situation",   label: "Situation" },
-  { id: "statut",      label: "Logement" },
-  { id: "departement", label: "Dépt." },
-  { id: "occupants",   label: "Foyer" },
-  { id: "revenus",     label: "Revenus" },
-  { id: "profil",      label: "Profil" },
-  { id: "contact",     label: "Contact" },
+  { id: "age",       label: "Âge" },        // 0
+  { id: "situation", label: "Situation" },   // 1
+  { id: "statut",    label: "Logement" },    // 2
+  { id: "foyer",     label: "Foyer" },       // 3 — département + occupants fusionnés
+  { id: "revenus",   label: "Revenus" },     // 4
+  { id: "profil",    label: "Profil" },      // 5
+  { id: "objectif",  label: "Objectif" },    // 6
+  { id: "contact",   label: "Contact" },     // 7 → soumission → résultats
+];
+
+const OBJECTIF_OPTIONS = [
+  {
+    value: "logement",
+    label: "Adapter le logement",
+    hint: "Salle de bain, escaliers, rampes, portes élargies, monte-escalier…",
+    icon: "🏠",
+  },
+  {
+    value: "services",
+    label: "Bénéficier d'aide à domicile",
+    hint: "Auxiliaire de vie, aide ménagère, portage de repas, téléassistance…",
+    icon: "🤝",
+  },
+  {
+    value: "les_deux",
+    label: "Les deux / tout savoir",
+    hint: "Je veux connaître l'ensemble des aides disponibles pour le maintien à domicile",
+    icon: "📋",
+  },
 ];
 
 const HOUSING_OPTIONS = [
   { value: "proprietaire_occupant", label: "Propriétaire occupant" },
-  { value: "proprietaire_bailleur", label: "Propriétaire bailleur" },
-  { value: "locataire_prive",       label: "Locataire d'un logement privé" },
-  { value: "locataire_social",      label: "Locataire d'un logement social" },
+  { value: "proprietaire_bailleur", label: "Propriétaire bailleur", hint: "Vous louez votre logement à un locataire en perte d'autonomie" },
+  { value: "locataire_prive",       label: "Locataire — parc privé", hint: "Votre propriétaire est un particulier ou une société privée" },
+  { value: "locataire_social",      label: "Locataire — parc social (HLM)", hint: "Logement HLM, ESH, OPH…" },
   { value: "autre",                 label: "Autre / je ne sais pas" },
 ];
 
 const SITUATION_OPTIONS = [
-  { value: "perte_severe", label: "Perte d'autonomie importante",   hint: "GIR 1 à 4 — dépendance modérée à totale" },
-  { value: "perte_legere", label: "Légère perte d'autonomie",        hint: "GIR 5-6 — autonomie globalement préservée" },
-  { value: "handicap",     label: "Situation de handicap reconnue", hint: "Avec ou en cours de reconnaissance MDPH" },
-  { value: "prevention",   label: "Prévention / anticipation",       hint: "Adapter le logement avant toute perte d'autonomie" },
+  { value: "perte_severe", label: "Perte d'autonomie importante",    hint: "Besoin d'aide pour se lever, se laver, s'habiller, manger (correspond aux GIR 1 à 4)" },
+  { value: "perte_legere", label: "Légère perte d'autonomie",         hint: "Autonomie globalement préservée, aide ponctuelle suffisante (correspond aux GIR 5-6)" },
+  { value: "handicap",     label: "Situation de handicap reconnue",  hint: "Avec taux d'incapacité reconnu ou en cours de reconnaissance MDPH / PCH" },
+  { value: "prevention",   label: "Prévention / anticipation",        hint: "Pas de perte d'autonomie notable — adapter par précaution ou sécuriser le logement" },
 ];
 
 const OCCUPANTS_OPTIONS = ["1", "2", "3", "4", "5", "6+"];
@@ -254,143 +275,449 @@ function getLocalAideInfo(dep) {
 // ── MOTEUR D'ÉLIGIBILITÉ ─────────────────────────────────────
 
 function computeAides(data) {
-  const age60plus        = data.age === "60_plus";
+  // ── Âge ──────────────────────────────────────────────────────
+  const age70plus  = data.age === "70_plus";
+  const age6069    = data.age === "60_69";
+  const age60plus  = age70plus || age6069;           // ≥ 60 ans (toutes tranches)
+  const ageLess60  = data.age === "less_60";
+
+  // ── Situation ────────────────────────────────────────────────
   const situationSevere  = data.situation === "perte_severe";
   const situationLegere  = data.situation === "perte_legere";
   const isHandicap       = data.situation === "handicap";
+  const isPrevention     = data.situation === "prevention";
 
+  // ── Statut logement ──────────────────────────────────────────
   const isProprietaire   = data.statut === "proprietaire_occupant";
+  const isBailleur       = data.statut === "proprietaire_bailleur";
   const isLocatairePrive = data.statut === "locataire_prive";
+  const isLocataireHLM   = data.statut === "locataire_social";
 
+  // ── Revenus ──────────────────────────────────────────────────
   const revenusTresModeste = data.revenus === "very_modest";
+  const revenusModeste     = data.revenus === "modest";
   const revenusAudessus    = data.revenus === "above";
 
+  // ── Profil ───────────────────────────────────────────────────
   const isRetraite = data.profil === "retraite";
   const isSalarie  = data.profil === "salarie";
 
   const aides = [];
 
-  // 1. MaPrimeAdapt'
-  if ((isProprietaire || isLocatairePrive) && !revenusAudessus) {
-    const taux    = revenusTresModeste ? 70 : 50;
-    const montant = revenusTresModeste ? 22000 : 14000;
+  // ══════════════════════════════════════════════════════════
+  //  SECTION A — SERVICES & AIDE À DOMICILE
+  // ══════════════════════════════════════════════════════════
+
+  // A1. APA — Plan d'aide services à domicile
+  // Éligible GIR 1-4 (perte sévère) ≥ 60 ans
+  if (age60plus && situationSevere) {
     aides.push({
-      id: "maprimeadapt", nom: "MaPrimeAdapt'", organisme: "ANAH / État",
+      id: "apa_services", nom: "APA — Services à domicile", organisme: "Conseil Départemental",
+      categorie: "services",
       eligible: true, niveau: revenusTresModeste ? "fort" : "moyen",
-      montantMax: montant,
-      montantLabel: `jusqu'à ${montant.toLocaleString("fr-FR")} €`,
-      taux: `${taux} % des travaux HT pris en charge`,
-      description: `Aide nationale pour les travaux d'adaptation du logement. Prise en charge à ${taux} % du montant HT.`,
-      condition: revenusTresModeste ? "Ménage à revenus très modestes (barème ANAH)" : "Ménage à revenus modestes (barème ANAH)",
+      montantMax: revenusTresModeste ? 18000 : 12000,  // annualisé indicatif
+      montantLabel: "jusqu'à 2 034 €/mois (GIR 1, 2026)",
+      taux: "Selon GIR 1-4 et participation sur revenus — revalorisé jan. 2026",
+      description: "L'APA à domicile finance un plan d'aide mensuel : auxiliaire de vie, aide ménagère, portage de repas, téléassistance, accueil de jour. Versée par le Conseil Départemental. Votre participation varie selon vos revenus. Montants 2026 : GIR 1 = 2 034 €/mois · GIR 2 = 1 666 €/mois · GIR 3 = 1 248 €/mois · GIR 4 = 830 €/mois.",
+      condition: "GIR 1 à 4 — perte d'autonomie modérée à totale — ≥ 60 ans",
     });
-  } else {
-    const raison = revenusAudessus
-      ? "Revenus dépassant les plafonds ANAH"
-      : `Statut "${HOUSING_OPTIONS.find(o => o.value === data.statut)?.label}" non éligible`;
+  } else if (age60plus && situationLegere) {
+    // GIR 5-6 : pas éligible APA mais peut bénéficier de l'aide CARSAT (voir section C)
     aides.push({
-      id: "maprimeadapt", nom: "MaPrimeAdapt'", organisme: "ANAH / État",
-      eligible: false, niveau: "non", montantMax: 0, montantLabel: "Non éligible",
+      id: "apa_services", nom: "APA — Services à domicile", organisme: "Conseil Départemental",
+      categorie: "services",
+      eligible: false, niveau: "non", montantMax: 0, montantLabel: "Non applicable",
       taux: "",
-      description: "Réservée aux propriétaires occupants et locataires du parc privé avec revenus modestes.",
-      condition: raison,
+      description: "L'APA services nécessite un niveau de perte d'autonomie GIR 1 à 4. En GIR 5-6, des aides alternatives existent via votre caisse de retraite (CARSAT) et votre commune (CCAS).",
+      condition: "GIR 5-6 : se renseigner auprès du CCAS ou de la CARSAT",
     });
   }
 
-  // 2. APA — volet adaptation du logement
-  if (age60plus && (situationSevere || situationLegere)) {
-    const montant = situationSevere ? 7000 : 3500;
-    aides.push({
-      id: "apa", nom: "APA — Volet adaptation du logement", organisme: "Conseil Départemental",
-      eligible: true, niveau: situationSevere ? "fort" : "moyen",
-      montantMax: montant,
-      montantLabel: `jusqu'à ${montant.toLocaleString("fr-FR")} €`,
-      taux: "Selon GIR et revenus du bénéficiaire",
-      description: "L'Aide Personnalisée d'Autonomie peut financer des travaux d'adaptation du logement en complément des autres aides.",
-      condition: situationSevere ? "Perte d'autonomie GIR 1 à 4 — 60 ans ou plus" : "Perte d'autonomie GIR 5-6 — 60 ans ou plus",
-    });
-  }
-
-  // 3. PCH — aménagement du logement
+  // A2. PCH — Aide humaine (auxiliaire de vie / aidant familial)
   if (isHandicap) {
     if (!age60plus) {
       aides.push({
-        id: "pch", nom: "PCH — Aménagement du logement", organisme: "MDPH",
-        eligible: true, niveau: "fort", montantMax: 10000,
-        montantLabel: "jusqu'à 10 000 €",
-        taux: "100 % des dépenses dans la limite du plafond",
-        description: "La Prestation de Compensation du Handicap prend en charge les travaux d'accessibilité et d'adaptation du logement.",
-        condition: "Reconnaissance MDPH — moins de 60 ans",
+        id: "pch_humain", nom: "PCH — Aide humaine", organisme: "MDPH",
+        categorie: "services",
+        eligible: true, niveau: "fort", montantMax: 20400,  // ~1700€/mois × 12
+        montantLabel: "jusqu'à 1 700 €/mois",
+        taux: "100 % des dépenses dans la limite du plafond horaire",
+        description: "La PCH aide humaine (volet 1) finance les heures d'auxiliaire de vie ou dédommage un aidant familial. Elle couvre aussi l'astreinte nocturne et les soins spécifiques liés au handicap.",
+        condition: "Difficulté absolue pour ≥ 1 acte essentiel, ou grave pour ≥ 2 — < 60 ans",
       });
     } else {
       aides.push({
-        id: "pch", nom: "PCH — Maintien des droits après 60 ans", organisme: "MDPH",
-        eligible: true, niveau: "moyen", montantMax: 10000,
-        montantLabel: "jusqu'à 10 000 €",
+        id: "pch_humain", nom: "PCH — Aide humaine (maintien)", organisme: "MDPH",
+        categorie: "services",
+        eligible: true, niveau: "moyen", montantMax: 20400,
+        montantLabel: "jusqu'à 1 700 €/mois",
         taux: "Si droits PCH ouverts avant 60 ans",
-        description: "La PCH peut être maintenue après 60 ans si les droits ont été ouverts avant cet âge. À vérifier auprès de votre MDPH.",
-        condition: "Handicap reconnu avant 60 ans — maintien à confirmer avec la MDPH",
+        description: "La PCH aide humaine peut être maintenue après 60 ans si les droits ont été ouverts avant cet âge ou si la personne est encore en activité professionnelle. À vérifier auprès de la MDPH.",
+        condition: "Handicap reconnu avant 60 ans — droits à maintenir auprès de la MDPH",
       });
     }
   }
 
-  // 4. Crédit d'impôt adaptation
-  // Éligible : 60 ans ou plus, OU perte d'autonomie, OU handicap reconnu.
-  // Pour "prévention" sans perte d'autonomie et moins de 60 ans : non applicable légalement.
-  // En revanche, pour les revenus >plafonds ANAH (non éligibles MaPrimeAdapt') avec 60+/autonomie, c'est souvent l'aide principale.
+  // A3. Crédit d'impôt services à la personne (CIAP)
+  // 50 % des dépenses, plafond 12 000 € (→ max 6 000 €/an). Accessible à TOUS sans conditions.
+  {
+    const accessible = age60plus || isHandicap || situationSevere || situationLegere;
+    aides.push({
+      id: "credit_impot_services", nom: "Crédit d'impôt services à la personne", organisme: "Finances Publiques",
+      categorie: "services",
+      eligible: accessible, niveau: accessible ? "moyen" : "non",
+      montantMax: accessible ? 6000 : 0,
+      montantLabel: accessible ? "jusqu'à 6 000 €/an" : "Non applicable",
+      taux: "50 % des dépenses de services à domicile (plafond 12 000 €)",
+      description: "Crédit d'impôt de 50 % sur les dépenses d'aide à domicile : auxiliaire de vie, ménage, garde malade, portage de repas, téléassistance… Remboursé même sans impôt à payer. Sans conditions de revenus.",
+      condition: "Contribuable ou non-imposable — applicable à toutes les aides à domicile agréées",
+    });
+  }
+
+  // A4. Téléassistance
+  if (age60plus || isHandicap || situationSevere) {
+    aides.push({
+      id: "teleassistance", nom: "Téléassistance 24h/24", organisme: "APA · CARSAT · CCAS · Mutuelle",
+      categorie: "services",
+      eligible: true, niveau: "info", montantMax: 0,
+      montantLabel: "Prise en charge totale ou partielle",
+      taux: "~20 à 30 €/mois — finançable via APA ou CARSAT",
+      description: "La téléassistance (bouton d'alarme, détecteur de chute) peut être intégrée au plan d'aide APA ou financée par la caisse de retraite, le CCAS ou la mutuelle. Ouvre droit au crédit d'impôt services à la personne.",
+      condition: "Toute personne âgée ou en situation de handicap à domicile",
+    });
+  }
+
+  // A5. CARSAT — Aide à domicile & prévention (retraités + personnes ayant cotisé)
+  if (isRetraite || data.profil === "autre") {
+    aides.push({
+      id: "carsat", nom: "Aides CARSAT / Caisse de retraite", organisme: "CARSAT · MSA · CNAV",
+      categorie: "services",
+      eligible: true, niveau: situationLegere ? "moyen" : "info",
+      montantMax: situationLegere ? 3500 : 0,
+      montantLabel: situationLegere ? "jusqu'à 3 500 €" : "Variable selon caisse",
+      taux: "Selon ressources et caisse de retraite",
+      description: "Votre caisse de retraite peut financer : aide à domicile (GIR 5-6 hors APA), portage de repas, téléassistance, adaptation du logement, accueil de jour. Le plan d'action personnalisé (PAP) recense toutes les aides disponibles.",
+      condition: "Retraité(e) ou personne ayant cotisé à une caisse de retraite — GIR 5-6 en priorité",
+    });
+  }
+
+  // A6. ARDH — Aide au Retour à Domicile après Hospitalisation
+  if (isRetraite || data.profil === "autre") {
+    const postHosti = data.chute_hospi === "oui";
+    aides.push({
+      id: "ardh", nom: "ARDH — Aide au Retour à Domicile", organisme: "CNAV / CARSAT",
+      categorie: "services",
+      eligible: true, niveau: postHosti ? "fort" : "info",
+      montantMax: postHosti ? 1800 : 0,
+      montantLabel: "jusqu'à 1 800 €",
+      taux: "Plan d'aide d'urgence sur 3 mois · déclenchable dès la sortie d'hospitalisation",
+      description: "Dès la sortie d'hospitalisation, votre caisse de retraite peut financer un plan d'aide d'urgence : aide ménagère, portage de repas, téléassistance, garde à domicile temporaire. À demander à votre CARSAT dans les 48 h suivant le retour à domicile.",
+      condition: "Retraité(e) régime général ou agricole — à déclencher dès la sortie d'hôpital",
+    });
+  }
+
+  // A7. AAH — Allocation Adultes Handicapés
+  if (isHandicap) {
+    const aahElig      = ageLess60;
+    const aahMaintien  = age6069;
+    aides.push({
+      id: "aah", nom: "AAH — Allocation Adultes Handicapés", organisme: "CAF / MSA",
+      categorie: "services",
+      eligible: aahElig || aahMaintien, niveau: aahElig ? "fort" : aahMaintien ? "moyen" : "non",
+      montantMax: (aahElig || aahMaintien) ? 12400 : 0,  // 1 033 € × 12, indicatif
+      montantLabel: "1 033 €/mois (2026)",
+      taux: "Taux incapacité ≥ 80 % (ou 50-80 % + restriction emploi)",
+      description: "Allocation mensuelle versée par la CAF aux personnes dont le taux d'incapacité est reconnu par la MDPH. Cumulable avec la PCH. Montant 2026 : 1 033,32 €/mois. À partir de 62 ans, transformation progressive en pension de retraite selon les droits acquis.",
+      condition: ageLess60
+        ? "Moins de 60 ans · Taux incapacité ≥ 80 % ou 50-80 % + restriction d'emploi — MDPH"
+        : age6069
+          ? "60-69 ans · Maintien possible si droits ouverts avant 60 ans — à confirmer CAF"
+          : "Non applicable (≥ 70 ans — retraite de substitution)",
+    });
+  }
+
+  // A8. AJPA — Allocation Journalière du Proche Aidant
+  // Toujours affiché : fort si aidant confirmé, info sinon (applicable à tous)
+  {
+    const aidantOui = data.aidant === "oui";
+    aides.push({
+      id: "ajpa", nom: "AJPA — Allocation Journalière Proche Aidant", organisme: "CAF / MSA",
+      categorie: "services",
+      eligible: true,
+      niveau: aidantOui ? "fort" : "info",
+      montantMax: aidantOui ? 4399 : 0,
+      montantLabel: aidantOui ? "66,64 €/jour (max 66 jours)" : "66,64 €/jour — si un proche réduit son activité",
+      taux: "Pendant le congé de proche aidant · jusqu'à 264 jours cumulés sur la vie",
+      description: "Si un proche (conjoint, enfant, parent…) réduit ou suspend son activité professionnelle pour vous accompagner, il peut percevoir l'AJPA. Versée par la CAF ou la MSA, elle compense partiellement la perte de revenus. Durée max : 66 jours par aidé (264 jours sur 4 proches différents).",
+      condition: "Aidant salarié ou indépendant · Versée sur 66 jours max par proche · CAF ou MSA",
+    });
+  }
+
+  // A9. Aide ménagère CCAS (GIR 5-6 hors APA, ou prévention)
+  if (age60plus && (situationLegere || isPrevention)) {
+    aides.push({
+      id: "aide_menagere_ccas", nom: "Aide ménagère — CCAS / Département", organisme: "CCAS · Conseil Départemental",
+      categorie: "services",
+      eligible: true, niveau: "moyen",
+      montantMax: 1200,
+      montantLabel: "Variable (selon revenus et commune)",
+      taux: "Quelques heures/semaine · sous conditions de revenus",
+      description: "Votre mairie (CCAS) et le Conseil Départemental proposent une aide-ménagère sociale pour les personnes âgées en GIR 5-6 ou en prévention, non éligibles à l'APA. Elle finance ménage, courses et aide à la préparation des repas. Premier contact : CCAS de votre mairie.",
+      condition: "≥ 60 ans · GIR 5-6 ou prévention · Conditions de revenus définies par le département",
+    });
+  }
+
+  // A10. Portage de repas
+  if (age60plus || isHandicap || situationSevere) {
+    aides.push({
+      id: "portage_repas", nom: "Portage de repas à domicile", organisme: "CCAS · APA · CARSAT",
+      categorie: "services",
+      eligible: true, niveau: "info",
+      montantMax: 0,
+      montantLabel: "~8 à 15 €/repas · finançable via APA ou CCAS",
+      taux: "Prise en charge partielle ou totale selon revenus et plan d'aide",
+      description: "Livraison de repas équilibrés à domicile 5 à 7 j/semaine. Finançable via le plan APA (volet services), le CCAS de la mairie, la CARSAT ou le crédit d'impôt services à la personne (50 %). Votre CCAS référence les prestataires locaux.",
+      condition: "Toute personne âgée ou en perte d'autonomie — premier contact : CCAS de mairie",
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  SECTION B — ADAPTATION DU LOGEMENT
+  // ══════════════════════════════════════════════════════════
+
+  // B1. MaPrimeAdapt'
+  if (isBailleur) {
+    const locataireEligible = situationSevere || isHandicap;
+    if (locataireEligible) {
+      aides.push({
+        id: "maprimeadapt", nom: "MaPrimeAdapt' — Bailleur", organisme: "ANAH / État",
+        categorie: "logement",
+        eligible: true, niveau: "moyen", tauxBadge: "35 %", montantMax: 21000,
+        montantLabel: "jusqu'à 21 000 €",
+        taux: "35 % des travaux HT (plafond 750 €/m² × 80 m²)",
+        description: "En tant que propriétaire bailleur, vous pouvez financer les travaux d'adaptation pour votre locataire en perte d'autonomie. Conventionnement ANAH obligatoire 6 ans minimum. AMO Vivalea obligatoire.",
+        condition: "Locataire avec GIR attesté, incapacité ≥ 50 % ou PCH",
+      });
+    } else {
+      aides.push({
+        id: "maprimeadapt", nom: "MaPrimeAdapt' — Bailleur", organisme: "ANAH / État",
+        categorie: "logement",
+        eligible: false, niveau: "non", montantMax: 0, montantLabel: "Conditions à vérifier",
+        taux: "",
+        description: "Réservée aux bailleurs dont le locataire présente une perte d'autonomie (GIR), un taux d'incapacité ≥ 50 % ou bénéficie de la PCH.",
+        condition: "Situation du locataire à préciser",
+      });
+    }
+  } else if ((isProprietaire || isLocatairePrive) && !revenusAudessus) {
+    let niveauMPA = "fort";
+    let conditionMPA = "";
+    let eligibleMPA = true;
+    const taux    = revenusTresModeste ? 70 : 50;
+    const montant = revenusTresModeste ? 22000 : 14000;
+
+    if (age70plus) {
+      // ≥ 70 ans → éligible directement
+      niveauMPA    = revenusTresModeste ? "fort" : "moyen";
+      conditionMPA = `≥ 70 ans · Revenus ${revenusTresModeste ? "très modestes" : "modestes"}`;
+    } else if (age6069) {
+      // 60-69 ans : toute perte d'autonomie (légère ou sévère) ou handicap reconnu → ÉLIGIBLE
+      if (situationSevere || situationLegere || isHandicap) {
+        niveauMPA    = revenusTresModeste ? "fort" : "moyen";
+        const situLabel = situationSevere ? "perte d'autonomie sévère (GIR 1-4)"
+          : situationLegere ? "perte d'autonomie (GIR 5-6)"
+          : "handicap reconnu (PCH)";
+        conditionMPA = `60-69 ans · ${situLabel} · Revenus ${revenusTresModeste ? "très modestes" : "modestes"}`;
+      } else {
+        // Prévention seule → probable (une consultation médicale pour GIR peut ouvrir les droits)
+        niveauMPA    = "moyen";
+        conditionMPA = "60-69 ans · Prévention — une évaluation GIR par le médecin traitant peut ouvrir l'éligibilité";
+      }
+    } else if (ageLess60) {
+      // < 60 ans : handicap reconnu OU perte sévère (GIR 1 implique éligibilité directe)
+      if (isHandicap || situationSevere) {
+        niveauMPA    = revenusTresModeste ? "fort" : "moyen";
+        conditionMPA = isHandicap
+          ? "< 60 ans · Handicap reconnu (PCH ou taux incapacité ≥ 50 %)"
+          : "< 60 ans · Perte d'autonomie sévère (GIR 1) · PCH ou évaluation MDPH";
+      } else {
+        // Légère ou prévention → non éligible
+        eligibleMPA  = false;
+      }
+    }
+
+    if (eligibleMPA) {
+      aides.push({
+        id: "maprimeadapt", nom: "MaPrimeAdapt'", organisme: "ANAH / État",
+        categorie: "logement",
+        eligible: true, niveau: niveauMPA, montantMax: montant,
+        montantLabel: `jusqu'à ${montant.toLocaleString("fr-FR")} €`,
+        taux: `${taux} % des travaux HT · AMO Vivalea obligatoire`,
+        description: `Aide nationale pour les travaux d'adaptation du logement (salle de bain, escaliers, circulations…). Prise en charge à ${taux} % du montant HT. L'accompagnement par un AMO agréé ANAH (Vivalea) est obligatoire pour constituer et déposer le dossier.`,
+        condition: conditionMPA,
+      });
+    } else {
+      aides.push({
+        id: "maprimeadapt", nom: "MaPrimeAdapt'", organisme: "ANAH / État",
+        categorie: "logement",
+        eligible: false, niveau: "non", montantMax: 0, montantLabel: "Non éligible",
+        taux: "",
+        description: "Réservée aux personnes ≥ 70 ans, aux 60-69 ans avec GIR, ou aux personnes handicapées (PCH / incapacité ≥ 50 %).",
+        condition: "Conditions d'âge ou de handicap non remplies",
+      });
+    }
+  } else {
+    const raison = revenusAudessus
+      ? "Revenus dépassant les plafonds ANAH"
+      : isLocataireHLM
+        ? "Locataires de logement social (HLM) non éligibles à MaPrimeAdapt'"
+        : `Statut "${HOUSING_OPTIONS.find(o => o.value === data.statut)?.label || "inconnu"}" non éligible`;
+    aides.push({
+      id: "maprimeadapt", nom: "MaPrimeAdapt'", organisme: "ANAH / État",
+      categorie: "logement",
+      eligible: false, niveau: "non", montantMax: 0, montantLabel: "Non éligible",
+      taux: "",
+      description: isLocataireHLM
+        ? "MaPrimeAdapt' ne s'applique pas aux logements HLM. Renseignez-vous auprès de votre bailleur social."
+        : "Réservée aux propriétaires occupants et locataires du parc privé avec revenus modestes.",
+      condition: raison,
+    });
+  }
+
+  // B2. APA — Volet adaptation du logement
+  if (age60plus && (situationSevere || situationLegere)) {
+    const montant = situationSevere ? 7000 : 3500;
+    aides.push({
+      id: "apa_logement", nom: "APA — Adaptation du logement", organisme: "Conseil Départemental",
+      categorie: "logement",
+      eligible: true, niveau: situationSevere ? "fort" : "moyen",
+      montantMax: montant,
+      montantLabel: `jusqu'à ${montant.toLocaleString("fr-FR")} €`,
+      taux: "Selon GIR et revenus — intégré au plan d'aide APA",
+      description: "Le plan d'aide APA peut inclure un volet « adaptation du logement » pour financer du matériel ou des petits travaux en complément de MaPrimeAdapt'. Peut aussi financer des aides techniques (barres, rampes, siège de bain…).",
+      condition: situationSevere ? "GIR 1 à 4 — ≥ 60 ans" : "GIR 5-6 — ≥ 60 ans",
+    });
+  }
+
+  // B3. PCH — Aménagement du logement
+  if (isHandicap) {
+    if (!age60plus) {
+      aides.push({
+        id: "pch_logement", nom: "PCH — Aménagement du logement", organisme: "MDPH",
+        categorie: "logement",
+        eligible: true, niveau: "fort", montantMax: 10000,
+        montantLabel: "jusqu'à 10 000 €",
+        taux: "100 % dans la limite du plafond",
+        description: "La PCH volet logement (volet 3) prend en charge les travaux d'accessibilité et d'adaptation : douche de plain-pied, élargissement de portes, monte-escalier… Cumulable avec MaPrimeAdapt' si éligible.",
+        condition: "Difficulté absolue pour ≥ 1 acte essentiel — < 60 ans (ou maintien de droits)",
+      });
+    } else {
+      aides.push({
+        id: "pch_logement", nom: "PCH — Aménagement du logement (maintien)", organisme: "MDPH",
+        categorie: "logement",
+        eligible: true, niveau: "moyen", montantMax: 10000,
+        montantLabel: "jusqu'à 10 000 €",
+        taux: "Si droits ouverts avant 60 ans",
+        description: "La PCH volet logement peut être maintenue après 60 ans si les droits ont été ouverts avant cet âge. À confirmer avec la MDPH.",
+        condition: "Handicap reconnu avant 60 ans — à vérifier avec la MDPH",
+      });
+    }
+  }
+
+  // B3b. PCH — Aides techniques (volet 2) : matériel adapté
+  if (isHandicap) {
+    aides.push({
+      id: "pch_techniques", nom: "PCH — Aides techniques (matériel)", organisme: "MDPH",
+      categorie: "logement",
+      eligible: true, niveau: !age60plus ? "fort" : "moyen",
+      montantMax: 13200,
+      montantLabel: "jusqu'à 13 200 € sur 10 ans",
+      taux: "100 % dans la limite du plafond · renouvellement selon durée de vie",
+      description: "La PCH volet 2 finance l'achat ou la location de matériel adapté : lit médicalisé, verticalisateur, matelas anti-escarres, fauteuil de bain, matériel domotique… Depuis décembre 2025, les fauteuils roulants sont pris en charge à 100 % directement par l'Assurance Maladie (sans rester à charge).",
+      condition: !age60plus
+        ? "Handicap reconnu MDPH · Moins de 60 ans"
+        : "Handicap reconnu avant 60 ans — maintien des droits PCH à confirmer avec la MDPH",
+    });
+  }
+
+  // B4. Crédit d'impôt équipements d'adaptation
   if (age60plus || situationSevere || situationLegere || isHandicap) {
     const estAlternativePrincipale = !((isProprietaire || isLocatairePrive) && !revenusAudessus);
     aides.push({
-      id: "credit_impot", nom: "Crédit d'impôt adaptation", organisme: "Finances Publiques",
+      id: "credit_impot", nom: "Crédit d'impôt équipements d'adaptation", organisme: "Finances Publiques",
+      categorie: "logement",
       eligible: true, niveau: estAlternativePrincipale ? "fort" : "moyen",
       montantMax: 2500,
       montantLabel: "jusqu'à 2 500 €",
       taux: "25 % des dépenses (plafond 5 000 € / personne)",
       description: estAlternativePrincipale
-        ? "En l'absence de MaPrimeAdapt', le crédit d'impôt est une aide directe accessible à tous pour financer les équipements d'adaptation. Valable même pour les revenus élevés."
-        : "Crédit d'impôt pour l'installation d'équipements spécialement conçus pour les personnes âgées ou handicapées.",
-      condition: "Propriétaires et locataires imposables — aucune condition de revenus",
+        ? "En l'absence de MaPrimeAdapt', le crédit d'impôt est une aide directe pour financer barres d'appui, douche adaptée, lit médicalisé… Valable pour tous les niveaux de revenus."
+        : "Crédit d'impôt pour équipements conçus pour personnes âgées ou handicapées (art. 200 quater A CGI) : barres, cabine de douche adaptée, monte-escalier…",
+      condition: "Propriétaires et locataires — aucune condition de revenus",
     });
   }
 
-  // 5. TVA réduite (toujours applicable)
+  // B5. TVA réduite
   aides.push({
-    id: "tva", nom: "TVA à taux réduit — 5,5 %", organisme: "État",
+    id: "tva", nom: "TVA à taux réduit — 10 %", organisme: "État",
+    categorie: "logement",
     eligible: true, niveau: "info", montantMax: 0,
-    montantLabel: "Économie sur la facture artisan",
-    taux: "5,5 % au lieu de 10 % ou 20 %",
-    description: "TVA réduite applicable sur les travaux d'adaptation pour personnes âgées ou handicapées. Appliquée directement par l'artisan.",
-    condition: "Logement de plus de 2 ans — mention obligatoire sur le devis",
+    montantLabel: "Économie directe sur facture artisan",
+    taux: "10 % (adaptation) ou 5,5 % (énergie) au lieu de 20 %",
+    description: "TVA réduite sur les travaux d'amélioration et d'adaptation pour personnes âgées ou handicapées. Appliquée directement par l'artisan sur le devis.",
+    condition: "Logement achevé depuis plus de 2 ans — résidence principale ou secondaire",
   });
 
-  // 6. CARSAT / Caisse de retraite
-  if (isRetraite) {
+  // B6. Loc'Avantages
+  if (isBailleur) {
     aides.push({
-      id: "carsat", nom: "Aide CARSAT / Caisse de retraite", organisme: "CARSAT · MSA · CNAV",
-      eligible: true, niveau: "moyen", montantMax: 3500,
-      montantLabel: "jusqu'à 3 500 €",
-      taux: "Selon ressources et caisse de retraite",
-      description: "Les caisses de retraite proposent des aides complémentaires pour l'adaptation du logement de leurs adhérents (surtout GIR 5-6).",
-      condition: "Retraité(e) du régime général, agricole ou autre caisse",
+      id: "loc_avantages", nom: "Loc'Avantages", organisme: "ANAH / Fisc",
+      categorie: "logement",
+      eligible: true, niveau: "info", montantMax: 0,
+      montantLabel: "Réduction fiscale 15 % à 65 %",
+      taux: "Sur loyers perçus, selon niveau de conventionnement",
+      description: "Conventionnement ANAH couplé à MaPrimeAdapt' bailleur : réduction d'impôt de 15 à 65 % sur les loyers perçus selon le niveau Loc1/2/3. Engagement minimum 6 ans.",
+      condition: "Logement non meublé loué à titre de résidence principale — DPE ≥ E exigé",
     });
   }
 
-  // 7. Action Logement
-  if (isSalarie || isRetraite) {
+  // ══════════════════════════════════════════════════════════
+  //  SECTION C — AIDES COMPLÉMENTAIRES
+  // ══════════════════════════════════════════════════════════
+
+  // C1. Action Logement — exclusivement pour salariés secteur privé (non éligible retraités)
+  if (isSalarie) {
     aides.push({
       id: "action_logement", nom: "Prêt Action Logement — 0 %", organisme: "Action Logement",
+      categorie: "complementaire",
       eligible: true, niveau: "info", montantMax: 0,
-      montantLabel: "Prêt jusqu'à 10 000 € (sans intérêts)",
-      taux: "Prêt à taux zéro",
-      description: "Prêt sans intérêts pour couvrir le reste à charge des travaux non subventionnés. Complément idéal aux aides directes.",
-      condition: "Salarié(e) ou retraité(e) d'une entreprise du secteur privé",
+      montantLabel: "Prêt jusqu'à 10 000 € (0 %)",
+      taux: "Prêt à taux zéro — reste à charge travaux",
+      description: "Prêt sans intérêts pour couvrir le reste à charge des travaux d'adaptation ou d'accessibilité non couverts par les subventions.",
+      condition: "Salarié(e) du secteur privé — entreprise cotisant à Action Logement",
     });
   }
 
-  // 8. Aides locales & territoriales (détail par département)
+
+  // C3. Remboursement fauteuil roulant 100 % (depuis déc. 2025)
+  if (isHandicap || situationSevere) {
+    aides.push({
+      id: "remboursement_am", nom: "Fauteuil roulant — Remboursement 100 %", organisme: "Assurance Maladie",
+      categorie: "complementaire",
+      eligible: true, niveau: "info",
+      montantMax: 0,
+      montantLabel: "100 % remboursé (réforme déc. 2025)",
+      taux: "Sur prescription médicale ou d'ergothérapeute — sans reste à charge",
+      description: "Depuis le 1er décembre 2025, tous les fauteuils roulants (manuel, électrique, modulaire, sportif) sont intégralement pris en charge par l'Assurance Maladie, sans aucun reste à charge. Sur prescription d'un médecin ou d'un ergothérapeute. Délai de réponse AM : 2 mois max.",
+      condition: "Sur prescription médicale — Assuré social — Tout type de fauteuil roulant",
+    });
+  }
+
+  // C4. Aides locales & territoriales
   const localInfo = getLocalAideInfo(data.departement || "");
   aides.push({
     id: "aides_locales", nom: "Aides locales & territoriales",
     organisme: localInfo.organisms,
+    categorie: "complementaire",
     eligible: true, niveau: "info", montantMax: 0,
     montantLabel: localInfo.montantLocal,
     taux: "Complémentaires aux aides nationales",
@@ -398,12 +725,19 @@ function computeAides(data) {
     condition: `Contact : ${localInfo.contact}`,
   });
 
-  // Total des subventions directes (fort + moyen, hors prêts et TVA)
-  const totalSubventions = aides
-    .filter(a => a.eligible && (a.niveau === "fort" || a.niveau === "moyen"))
+  // ── Totaux séparés par catégorie ─────────────────────────
+  const elig = a => a.eligible && (a.niveau === "fort" || a.niveau === "moyen");
+
+  // Logement : subventions ponctuelles (en €, cumulables)
+  const totalLogement = aides
+    .filter(a => a.categorie === "logement" && elig(a))
     .reduce((s, a) => s + a.montantMax, 0);
 
-  return { aides, totalSubventions };
+  // Services : aides mensuelles/récurrentes → on ne cumule pas, on compte et on identifie la principale
+  const nbServicesElig = aides.filter(a => a.categorie === "services" && elig(a)).length;
+  const topServiceAide = aides.find(a => a.categorie === "services" && elig(a));
+
+  return { aides, totalLogement, nbServicesElig, topServiceAide };
 }
 
 // ── STYLES ──────────────────────────────────────────────────
@@ -590,7 +924,7 @@ function NavButtons({ onBack, onNext, canGoNext, showBack, nextLabel = "Continue
     <div style={S.navRow}>
       {showBack ? <button style={S.backBtn} onClick={onBack}>← Retour</button> : <div />}
       <button style={S.nextBtn(!canGoNext)} onClick={onNext} disabled={!canGoNext}>
-        {nextLabel} →
+        {nextLabel.endsWith("→") ? nextLabel : `${nextLabel} →`}
       </button>
     </div>
   );
@@ -603,9 +937,10 @@ function StepAge({ data, onChange }) {
     <>
       <h2 style={S.question}>Quelle est la tranche d'âge de la personne concernée ?</h2>
       <p style={S.hint}>La personne qui souhaite adapter son logement.</p>
-      <div style={S.optionsGrid(2)}>
+      <div style={S.optionsGrid(1)}>
         <OptionButton label="Moins de 60 ans" selected={data.age === "less_60"} onClick={() => onChange("age", "less_60")} />
-        <OptionButton label="60 ans ou plus"  selected={data.age === "60_plus"}  onClick={() => onChange("age", "60_plus")} />
+        <OptionButton label="60 à 69 ans" hint="Éligibilité MaPrimeAdapt' sous condition de GIR (perte d'autonomie évaluée)" selected={data.age === "60_69"} onClick={() => onChange("age", "60_69")} />
+        <OptionButton label="70 ans ou plus" hint="Éligibilité directe à MaPrimeAdapt'" selected={data.age === "70_plus"} onClick={() => onChange("age", "70_plus")} />
       </div>
     </>
   );
@@ -671,46 +1006,56 @@ function StepStatut({ data, onChange }) {
       <p style={S.hint}>Le statut d'occupation détermine l'éligibilité à certaines aides.</p>
       <div style={S.optionsGrid(1)}>
         {HOUSING_OPTIONS.map(opt => (
-          <OptionButton key={opt.value} label={opt.label}
+          <OptionButton key={opt.value} label={opt.label} hint={opt.hint}
             selected={data.statut === opt.value} onClick={() => onChange("statut", opt.value)} />
         ))}
       </div>
+      {data.statut === "locataire_social" && (
+        <div style={{
+          marginTop: 10, padding: "10px 14px", borderRadius: 8,
+          background: "#FFF7ED", border: "1px solid #FED7AA",
+          fontSize: 12, color: "#92400E", lineHeight: 1.5,
+        }}>
+          ℹ️ <strong>Locataire HLM :</strong> MaPrimeAdapt' n'est pas accessible aux locataires du parc social. Rapprochez-vous de votre bailleur social qui peut proposer des travaux d'adaptation, et du Conseil Départemental pour l'APA.
+        </div>
+      )}
     </>
   );
 }
 
-function StepDepartement({ data, onChange }) {
+function StepFoyer({ data, onChange }) {
   const isValid = data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
   return (
     <>
-      <h2 style={S.question}>Quel est le département du logement ?</h2>
-      <p style={S.hint}>Certaines aides locales varient selon le département.</p>
-      <input type="text" inputMode="numeric" maxLength={3}
-        placeholder="Ex : 75, 92, 13…"
-        value={data.departement || ""}
-        onChange={e => onChange("departement", e.target.value.trim())}
-        style={{
-          ...S.input,
-          borderColor: data.departement && !isValid ? "#DC2626" : "#E8E2DD",
-          textAlign: "center", fontSize: 24, fontWeight: 700, letterSpacing: 4,
-        }}
-        onFocus={e => (e.target.style.borderColor = "#8F1349")}
-        onBlur={e => (e.target.style.borderColor = data.departement && !isValid ? "#DC2626" : "#E8E2DD")}
-      />
-      {data.departement && !isValid && <p style={S.error}>Veuillez saisir un numéro de département valide.</p>}
-    </>
-  );
-}
+      <h2 style={S.question}>Votre foyer</h2>
+      <p style={S.hint}>Département et composition du foyer — ils déterminent vos plafonds de revenus.</p>
 
-function StepOccupants({ data, onChange }) {
-  return (
-    <>
-      <h2 style={S.question}>Combien de personnes habitent dans ce logement ?</h2>
-      <p style={S.hint}>Y compris la personne concernée.</p>
-      <div style={S.optionsGrid(3)}>
-        {OCCUPANTS_OPTIONS.map(n => (
-          <OptionButton key={n} label={n} center selected={data.occupants === n} onClick={() => onChange("occupants", n)} />
-        ))}
+      {/* Département */}
+      <div style={{ marginBottom: 20 }}>
+        <label style={S.fieldLabel}>Département du logement</label>
+        <input type="text" inputMode="numeric" maxLength={3}
+          placeholder="Ex : 75, 92, 13…"
+          value={data.departement || ""}
+          onChange={e => onChange("departement", e.target.value.trim())}
+          style={{
+            ...S.input,
+            borderColor: data.departement && !isValid ? "#DC2626" : "#E8E2DD",
+            textAlign: "center", fontSize: 20, fontWeight: 700, letterSpacing: 6,
+          }}
+          onFocus={e => (e.target.style.borderColor = "#8F1349")}
+          onBlur={e => (e.target.style.borderColor = data.departement && !isValid ? "#DC2626" : "#E8E2DD")}
+        />
+        {data.departement && !isValid && <p style={S.error}>Numéro de département invalide (ex : 06, 75, 2A…).</p>}
+      </div>
+
+      {/* Occupants */}
+      <div>
+        <label style={S.fieldLabel}>Nombre de personnes dans le logement <span style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 400 }}>(y compris la personne concernée)</span></label>
+        <div style={S.optionsGrid(3)}>
+          {OCCUPANTS_OPTIONS.map(n => (
+            <OptionButton key={n} label={n} center selected={data.occupants === n} onClick={() => onChange("occupants", n)} />
+          ))}
+        </div>
       </div>
     </>
   );
@@ -723,8 +1068,8 @@ function StepRevenus({ data, onChange }) {
     <>
       <h2 style={S.question}>Quel est le revenu fiscal de référence du foyer ?</h2>
       <p style={S.hint}>
-        Revenus cumulés de toutes les personnes dans le logement (avis d'imposition N-1).
-        {data.occupants && <span style={{ color: "#8F1349", fontWeight: 600 }}> Foyer de {data.occupants} personne{data.occupants === "1" ? "" : "s"}{isIDF ? " — barème IDF" : ""}.</span>}
+        Revenus fiscaux de référence cumulés (ligne 14H de votre avis d'imposition N-1), toutes les personnes du foyer.
+        {data.occupants && <span style={{ color: "#8F1349", fontWeight: 600 }}> Foyer de {data.occupants} personne{data.occupants === "1" ? "" : "s"}{isIDF ? " — barème Île-de-France" : ""}.</span>}
       </p>
       <div style={S.optionsGrid(1)}>
         {opts.map(opt => (
@@ -757,7 +1102,7 @@ function StepContact({ data, onChange, errors }) {
       <h2 style={S.question}>Vos résultats sont prêts</h2>
       <p style={S.hint}>Renseignez vos coordonnées pour recevoir votre bilan d'aides personnalisé par email.</p>
       <div style={S.fieldGroup}>
-        <label style={S.fieldLabel}>Prénom et Nom <span style={S.required}>*</span></label>
+        <label style={S.fieldLabel}>Prénom et Nom de la personne à accompagner <span style={S.required}>*</span></label>
         <input type="text" placeholder="Caroline Dupont" value={data.nom || ""}
           onChange={e => onChange("nom", e.target.value)}
           style={{ ...S.input, borderColor: errors?.nom ? "#DC2626" : "#E8E2DD" }}
@@ -840,13 +1185,33 @@ function StepContact({ data, onChange, errors }) {
   );
 }
 
+function StepObjectif({ data, onChange }) {
+  return (
+    <>
+      <h2 style={S.question}>Quel est l'objectif principal ?</h2>
+      <p style={S.hint}>Cela nous permettra de mettre en avant les aides les plus utiles pour votre situation.</p>
+      <div style={S.optionsGrid(1)}>
+        {OBJECTIF_OPTIONS.map(opt => (
+          <OptionButton
+            key={opt.value}
+            label={`${opt.icon}  ${opt.label}`}
+            hint={opt.hint}
+            selected={data.objectif === opt.value}
+            onClick={() => onChange("objectif", opt.value)}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ── RÉSULTATS ────────────────────────────────────────────────
 
 // Carte hero MaPrimeAdapt' (pleine largeur, mise en avant)
 function MaPrimeAdaptHero({ aide, allAides }) {
   const cfg = NIVEAU_CONFIG[aide.niveau] || NIVEAU_CONFIG.non;
   const isEligible = aide.niveau === "fort" || aide.niveau === "moyen";
-  const taux = aide.niveau === "fort" ? "70 %" : aide.niveau === "moyen" ? "50 %" : null;
+  const taux = aide.tauxBadge || (aide.niveau === "fort" ? "70 %" : aide.niveau === "moyen" ? "50 %" : null);
 
   // Montage alternatif : top 3 aides par montant décroissant quand non éligible
   const topAlternatives = !isEligible
@@ -943,14 +1308,29 @@ function MaPrimeAdaptHero({ aide, allAides }) {
 
 // ── MENTIONS LÉGALES PAR AIDE ────────────────────────────────
 const MENTIONS_LEGALES = {
-  maprimeadapt:    "Montant indicatif. Le calcul définitif est réalisé par l'ANAH sur la base de vos devis de travaux et de votre situation fiscale.",
-  apa:             "Montant indicatif. Le calcul définitif est réalisé par votre Conseil Départemental après évaluation de votre niveau d'autonomie (GIR).",
-  pch:             "Montant indicatif. L'attribution est décidée par la MDPH après instruction de votre dossier et évaluation de vos besoins de compensation.",
-  credit_impot:    "Montant indicatif. Le calcul définitif dépend de votre situation fiscale et est réalisé par la DGFiP lors de votre déclaration d'impôts.",
-  tva:             "Applicable directement par l'artisan sur le devis. Sous réserve d'éligibilité des travaux et de la conformité du logement (+ de 2 ans).",
-  carsat:          "Montant indicatif. Variable selon votre caisse de retraite, vos ressources et les critères d'attribution en vigueur.",
-  action_logement: "Prêt à taux zéro sous conditions d'éligibilité. Accordé par Action Logement sous réserve d'étude de dossier et d'accord de l'employeur.",
-  aides_locales:   "Montants et conditions variables selon votre commune et département. À vérifier directement auprès des organismes locaux mentionnés.",
+  // ── Services à domicile ──────────────────────────────────
+  apa_services:         "Montant indicatif. L'APA à domicile est versée par le Conseil Départemental après évaluation par l'équipe médico-sociale (GIR 1-4). Le montant réel du plan d'aide dépend du GIR attribué et de vos ressources (participation progressive). Le plan d'aide est révisé annuellement.",
+  pch_humain:           "Montant indicatif. La PCH aide humaine (volet 1) est attribuée par la MDPH après examen du dossier et évaluation des besoins de compensation. Elle peut financer un(e) auxiliaire de vie, un(e) aidant(e) familial(e) dédommag(e), une garde de nuit ou une astreinte. Le taux horaire de prise en charge est plafonné par arrêté.",
+  credit_impot_services:"Crédit d'impôt de 50 % sur les dépenses de services à la personne engagées auprès d'un organisme agréé (article 199 sexdecies du CGI). Remboursé par l'État même si non imposable. Plafond annuel de dépenses : 12 000 € (majoré pour les personnes âgées ou handicapées). À déclarer sur la déclaration annuelle de revenus.",
+  teleassistance:       "La téléassistance peut être prise en charge dans le plan d'aide APA, par la CARSAT, le CCAS ou la mutuelle. Les dépenses de téléassistance ouvrent droit au crédit d'impôt services à la personne (50 %). Renseignez-vous auprès de votre département, caisse de retraite ou commune pour les modalités locales.",
+  carsat:               "Les aides CARSAT (et équivalents MSA, CNAV…) sont variables selon votre caisse, vos ressources et les critères d'attribution. Le Plan d'Action Personnalisé (PAP) peut couvrir : aide à domicile, portage de repas, téléassistance, adaptation du logement. À demander directement à votre caisse de retraite.",
+  ardh:                 "L'ARDH (Aide au Retour à Domicile après Hospitalisation) est déclenchée à la sortie d'hospitalisation sur demande auprès de votre CARSAT dans les 48 h. Elle finance jusqu'à 3 mois d'aide d'urgence : aide ménagère, portage de repas, téléassistance, garde temporaire. À ne pas confondre avec l'APA (aide long terme). Renseignez-vous directement auprès de votre caisse de retraite.",
+  aah:                  "L'AAH (Allocation aux Adultes Handicapés) est versée par la CAF aux personnes dont le taux d'incapacité est reconnu ≥ 80 % par la MDPH, ou entre 50 et 80 % avec restriction substantielle d'accès à l'emploi. Montant 2026 : 1 033,32 €/mois. Cumulable avec la PCH. À partir de 62 ans, transformation progressive en pension de retraite anticipée selon les droits acquis.",
+  ajpa:                 "L'AJPA (Allocation Journalière du Proche Aidant) compense la perte de revenus d'un aidant qui réduit ou suspend son activité professionnelle. Versée par la CAF ou la MSA. Durée max : 66 jours par proche aidé (264 jours cumulés sur 4 proches différents). Montant 2026 : 66,64 €/jour (33,32 € pour une demi-journée). Cumulable avec la compensation aidant familial PCH.",
+  aide_menagere_ccas:   "L'aide ménagère sociale du CCAS est une aide légale à domicile pour les personnes âgées hors APA (GIR 5-6 ou prévention). Accordée sous conditions de revenus fixées par le département, elle finance quelques heures par semaine d'aide ménagère. Renseignez-vous directement au CCAS de votre mairie ou au Conseil Départemental.",
+  portage_repas:        "Le portage de repas peut être financé via le plan APA (volet services), le CCAS de votre commune, la CARSAT ou via le crédit d'impôt services à la personne (50 %). Il contribue au maintien d'une alimentation équilibrée et à la prévention de l'isolement. Votre CCAS référence les prestataires locaux agréés.",
+  // ── Adaptation du logement ──────────────────────────────
+  maprimeadapt:         "Montant indicatif. Le calcul définitif est réalisé par l'ANAH sur la base de vos devis de travaux et de votre situation fiscale. L'accompagnement par un AMO (Assistance à Maîtrise d'Ouvrage) agréé ANAH — comme Vivalea — est obligatoire pour constituer et déposer le dossier.",
+  apa_logement:         "Montant indicatif. Le volet adaptation du logement du plan d'aide APA est fixé par le Conseil Départemental après évaluation du GIR. Il peut financer du matériel (barres d'appui, siège de bain, rampes) et de petits travaux en complément de MaPrimeAdapt'. Non cumulable sur les mêmes postes.",
+  pch_logement:         "Montant indicatif. La PCH volet logement (volet 3) est attribuée par la MDPH. Elle peut se cumuler avec MaPrimeAdapt' si les postes de travaux sont distincts. Plafond sur 10 ans (révisable si changement de situation). AMO conseillé pour optimiser le montage financier.",
+  pch_techniques:       "La PCH volet 2 (aides techniques) finance l'achat ou la location de matériel adapté au handicap : lit médicalisé, verticalisateur, matelas anti-escarres, fauteuil de bain, appareil auditif, matériel domotique. Plafond : 13 200 € sur 10 ans. Depuis le 1er décembre 2025, les fauteuils roulants sont intégralement pris en charge par l'Assurance Maladie, sans reste à charge — la PCH couvre donc les autres équipements.",
+  credit_impot:         "Montant indicatif. Crédit d'impôt pour équipements conçus pour les personnes âgées ou handicapées (art. 200 quater A CGI). Liste des équipements éligibles fixée par arrêté ministériel. Calculé lors de la déclaration de revenus par la DGFiP.",
+  tva:                  "Applicable directement par l'artisan sur le devis. Sous réserve d'éligibilité des travaux et de la conformité du logement (+ de 2 ans). Taux 5,5 % pour travaux d'économies d'énergie ; 10 % pour les autres travaux d'amélioration.",
+  loc_avantages:        "Dispositif fiscal conditionné au conventionnement ANAH 6 ans minimum. Niveaux Loc1 (intermédiaire), Loc2 (social), Loc3 (très social) avec réductions fiscales croissantes (15 à 65 %). Cumulable avec MaPrimeAdapt' bailleur.",
+  // ── Complémentaires ─────────────────────────────────────
+  action_logement:      "Prêt à taux zéro réservé aux salariés du secteur privé dont l'employeur cotise à Action Logement. Accordé sous réserve d'étude de dossier. Permet de financer le reste à charge après les subventions directes.",
+  remboursement_am:     "Depuis le 1er décembre 2025, tous les fauteuils roulants (manuel, électrique, modulaire, sportif) sont intégralement remboursés par l'Assurance Maladie, sans reste à charge, sur prescription d'un médecin ou d'un ergothérapeute. Cette réforme concerne plus d'un million d'usagers. Délai d'accord : 2 mois max. Renseignements sur ameli.fr.",
+  aides_locales:        "Montants et conditions variables selon votre commune et département. À vérifier directement auprès des organismes locaux mentionnés.",
 };
 
 // ── COMPOSANT TOOLTIP ⓘ ──────────────────────────────────────
@@ -1054,49 +1434,115 @@ function AideCardNon({ aide }) {
 }
 
 function ResultScreen({ data, onReset }) {
-  const { aides, totalSubventions } = computeAides(data);
+  const { aides, totalLogement, nbServicesElig, topServiceAide } = computeAides(data);
 
-  const mpa            = aides.find(a => a.id === "maprimeadapt");
-  const autresEligibles = aides.filter(a => a.id !== "maprimeadapt" && a.eligible && a.niveau !== "non");
-  const nonEligibles   = aides.filter(a => !a.eligible || a.niveau === "non");
-  const nbSubventions  = aides.filter(a => a.eligible && (a.niveau === "fort" || a.niveau === "moyen")).length;
+  const mpa = aides.find(a => a.id === "maprimeadapt");
 
-  // Découpe en paires pour la grille 2 colonnes
-  const paires = [];
-  for (let i = 0; i < autresEligibles.length; i += 2) {
-    paires.push(autresEligibles.slice(i, i + 2));
+  // Uniquement les aides éligibles (fort + moyen + info) — non-éligibles masqués
+  const servicesEligibles       = aides.filter(a => a.categorie === "services" && a.eligible && a.niveau !== "non");
+  const logementEligibles       = aides.filter(a => a.categorie === "logement" && a.id !== "maprimeadapt" && a.eligible && a.niveau !== "non");
+  const complementaireEligibles = aides.filter(a => a.categorie === "complementaire" && a.eligible && a.niveau !== "non");
+
+  // Grille 2 colonnes
+  function renderGrid(list) {
+    const pairs = [];
+    for (let i = 0; i < list.length; i += 2) pairs.push(list.slice(i, i + 2));
+    return pairs.map((pair, i) => (
+      <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        {pair.map(aide => <AideCardCompact key={aide.id} aide={aide} />)}
+      </div>
+    ));
   }
+
+  // En-tête de section
+  function SectionHeader({ icon, label, color }) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "14px 0 10px" }}>
+        <span style={{ fontSize: 15 }}>{icon}</span>
+        <span style={{
+          fontSize: 10, fontWeight: 700, color,
+          textTransform: "uppercase", letterSpacing: "0.1em",
+        }}>{label}</span>
+        <div style={{ flex: 1, height: 1, background: color + "40", marginLeft: 4 }} />
+      </div>
+    );
+  }
+
+  const objectifBanner = data.objectif || "les_deux";
+  const nbLogementElig = aides.filter(a => a.categorie === "logement" && a.eligible && (a.niveau === "fort" || a.niveau === "moyen")).length;
+
+  // Tuile logement
+  const TuileLogement = ({ big }) => (
+    <div style={{
+      background: "linear-gradient(135deg, #8F1349 0%, #6B0D37 100%)",
+      borderRadius: 12, padding: big ? "18px 20px" : "12px 16px",
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 9, color: "rgba(255,255,255,0.7)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
+          🏠 Adaptation du logement
+        </div>
+        <div style={{ fontSize: big ? 26 : 18, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: "'DM Serif Display', Georgia, serif" }}>
+          {totalLogement > 0 ? `jusqu'à ${totalLogement.toLocaleString("fr-FR")} €` : "Aides disponibles"}
+        </div>
+        {big && <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", marginTop: 5 }}>Subventions directes estimées · Non contractuel</div>}
+      </div>
+      <div style={{
+        width: big ? 48 : 38, height: big ? 48 : 38, borderRadius: "50%", flexShrink: 0,
+        background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.35)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      }}>
+        <div style={{ fontSize: big ? 18 : 14, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{nbLogementElig}</div>
+        <div style={{ fontSize: 7, color: "rgba(255,255,255,0.7)" }}>aides</div>
+      </div>
+    </div>
+  );
+
+  // Tuile services
+  const TuileServices = ({ big }) => nbServicesElig > 0 ? (
+    <div style={{
+      background: big
+        ? "linear-gradient(135deg, #047857 0%, #065F46 100%)"
+        : "linear-gradient(135deg, #059669 0%, #047857 100%)",
+      borderRadius: 12, padding: big ? "18px 20px" : "12px 16px",
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 9, color: "rgba(255,255,255,0.7)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
+          🤝 Services à domicile
+        </div>
+        <div style={{ fontSize: big ? 26 : 18, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: "'DM Serif Display', Georgia, serif" }}>
+          {topServiceAide ? topServiceAide.montantLabel : `${nbServicesElig} aides`}
+        </div>
+        {big && topServiceAide && <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", marginTop: 5 }}>{topServiceAide.nom} · Aides mensuelles / récurrentes</div>}
+      </div>
+      <div style={{
+        width: big ? 48 : 38, height: big ? 48 : 38, borderRadius: "50%", flexShrink: 0,
+        background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.35)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      }}>
+        <div style={{ fontSize: big ? 18 : 14, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{nbServicesElig}</div>
+        <div style={{ fontSize: 7, color: "rgba(255,255,255,0.7)" }}>aides</div>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div style={{ animation: "fadeIn 0.5s ease" }}>
 
-      {/* ── Bannière total ── */}
-      <div style={{
-        background: "linear-gradient(135deg, #8F1349 0%, #6B0D37 100%)",
-        borderRadius: 14, padding: "18px 20px", marginBottom: 14,
-        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-      }}>
-        <div style={{ flex: 1, textAlign: "center" }}>
-          <div style={{ fontSize: 9, color: "rgba(255,255,255,0.7)", fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 6 }}>
-            Potentiel subventions directes estimées
-          </div>
-          <div style={{ fontSize: 30, fontWeight: 800, color: "#FFFFFF", lineHeight: 1, fontFamily: "'DM Serif Display', Georgia, serif" }}>
-            {totalSubventions > 0 ? `jusqu'à ${totalSubventions.toLocaleString("fr-FR")} €` : "Aides disponibles"}
-          </div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", marginTop: 7, lineHeight: 1.4, padding: "0 8px" }}>
-            Estimation indicative, non contractuelle. Les montants réels dépendent de l'instruction du dossier par les organismes compétents.
-          </div>
-        </div>
-        <div style={{ textAlign: "center", flexShrink: 0 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: "50%",
-            background: "rgba(255,255,255,0.15)", border: "2px solid rgba(255,255,255,0.4)",
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{nbSubventions}</div>
-            <div style={{ fontSize: 8, color: "rgba(255,255,255,0.75)", letterSpacing: "0.04em" }}>aides</div>
-          </div>
-        </div>
+      {/* ── Bannière duale — ordre selon objectif ── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+        {objectifBanner === "services" ? (
+          <>
+            <TuileServices big={true} />
+            <TuileLogement big={false} />
+          </>
+        ) : (
+          <>
+            <TuileLogement big={true} />
+            <TuileServices big={false} />
+          </>
+        )}
       </div>
 
       {/* ── Profil récap ── */}
@@ -1106,7 +1552,7 @@ function ResultScreen({ data, onReset }) {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 10px" }}>
           {[
-            { label: "Âge",       value: data.age === "60_plus" ? "60 ans ou +" : "Moins de 60 ans" },
+            { label: "Âge",       value: data.age === "70_plus" ? "70 ans ou plus" : data.age === "60_69" ? "60 à 69 ans" : "Moins de 60 ans" },
             { label: "Situation", value: SITUATION_OPTIONS.find(o => o.value === data.situation)?.label },
             { label: "Logement",  value: HOUSING_OPTIONS.find(o => o.value === data.statut)?.label },
             { label: "Revenus",   value: getIncomeOptions(data.occupants, data.departement).find(o => o.value === data.revenus)?.label },
@@ -1121,47 +1567,98 @@ function ResultScreen({ data, onReset }) {
         </div>
       </div>
 
-      {/* ── MaPrimeAdapt' en vedette ── */}
-      {mpa && <MaPrimeAdaptHero aide={mpa} allAides={aides} />}
+      {/* ── Sections — ordre adapté à l'objectif du client ── */}
+      {(() => {
+        const objectif = data.objectif || "les_deux";
 
-      {/* ── Autres aides en grille 2 colonnes ── */}
-      {paires.length > 0 && (
-        <>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#18263F", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, textAlign: "center" }}>
-            Autres aides identifiées
-          </div>
-          {paires.map((paire, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-              {paire.map(aide => <AideCardCompact key={aide.id} aide={aide} />)}
+        const sectionServices = servicesEligibles.length > 0 ? (
+          <>
+            <SectionHeader icon="🤝" label="Services &amp; aide à domicile" color="#059669" />
+            {renderGrid(servicesEligibles)}
+          </>
+        ) : null;
+
+        const BlocSansMPA = () => (
+          <div style={{
+            background: "#F8F6F4", border: "1px solid #E8E2DD", borderRadius: 12,
+            padding: "16px 16px 12px", marginTop: 10,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#8F1349", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
+              🔧 Financer vos travaux sans MaPrimeAdapt'
             </div>
-          ))}
-        </>
-      )}
-
-      {/* ── Non éligibles ── */}
-      {nonEligibles.length > 0 && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-            Non applicable dans votre situation
+            <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.7, marginBottom: 12 }}>
+              Sans MaPrimeAdapt', le <strong>crédit d'impôt équipements d'adaptation</strong> (art. 200 quater A CGI) reste la solution principale :
+              il couvre <strong>25 % du coût des équipements</strong> (barres d'appui, douche adaptée, monte-escalier…), déduit directement de votre impôt.
+            </div>
+            <div style={{
+              background: "linear-gradient(135deg, #8F1349 0%, #6B0D37 100%)",
+              borderRadius: 10, padding: "12px 14px",
+              display: "flex", alignItems: "center", gap: 12,
+            }}>
+              <div style={{ fontSize: 22, flexShrink: 0 }}>🏡</div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", marginBottom: 3 }}>
+                  Vivalea vous met en relation avec des artisans qualifiés
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", lineHeight: 1.5 }}>
+                  Sélectionnés près de chez vous, spécialisés en adaptation du logement — devis gratuit, travaux suivis par un conseiller Vivalea.
+                </div>
+              </div>
+            </div>
           </div>
-          {nonEligibles.map(aide => <AideCardNon key={aide.id} aide={aide} />)}
+        );
+
+        const sectionLogement = (
+          <>
+            <SectionHeader icon="🏠" label="Adaptation du logement" color="#8F1349" />
+            {mpa && <MaPrimeAdaptHero aide={mpa} allAides={aides} />}
+            {mpa && mpa.niveau === "non" && objectif !== "services" &&
+              data.statut !== "proprietaire_bailleur" && <BlocSansMPA />}
+            {logementEligibles.length > 0 && renderGrid(logementEligibles)}
+          </>
+        );
+
+        const sectionCompl = complementaireEligibles.length > 0 ? (
+          <>
+            <SectionHeader icon="💼" label="Aides complémentaires" color="#6B7280" />
+            {renderGrid(complementaireEligibles)}
+          </>
+        ) : null;
+
+        // BlocSansMPA en bas (objectif = services uniquement)
+        const blocSansMPaBottom = mpa && mpa.niveau === "non" && objectif === "services" &&
+          data.statut !== "proprietaire_bailleur"
+          ? <BlocSansMPA /> : null;
+
+        if (objectif === "services") {
+          return <>{sectionServices}{sectionLogement}{sectionCompl}{blocSansMPaBottom}</>;
+        } else {
+          return <>{sectionLogement}{sectionServices}{sectionCompl}</>;
+        }
+      })()}
+
+      {/* ── Délai estimé MaPrimeAdapt' ── */}
+      {mpa?.eligible && mpa.niveau !== "non" && (
+        <div style={{
+          background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 10,
+          padding: "12px 14px", marginTop: 14, fontSize: 12, color: "#92400E", lineHeight: 1.6,
+        }}>
+          ⏱ <strong>Délai estimé MaPrimeAdapt' :</strong> comptez 3 à 6 mois entre le dépôt du dossier et le versement. Vivalea pilote l'ensemble du dossier de A à Z.
         </div>
       )}
 
-      {/* ── CTA ── */}
+      {/* ── Confirmation + lien retour ── */}
       <div style={{
-        background: "#F8F6F4", borderRadius: 10, padding: "14px 16px",
-        marginTop: 14, borderLeft: "4px solid #8F1349",
+        background: "#ECFDF5", border: "1px solid #6EE7B7", borderRadius: 10,
+        padding: "14px 16px", marginTop: 14, textAlign: "center",
       }}>
-        <p style={{ fontSize: 13, color: "#18263F", lineHeight: 1.6, margin: 0, fontWeight: 500 }}>
-          Un conseiller Vivalea vous accompagne gratuitement pour monter votre dossier et maximiser votre financement.
-        </p>
+        <div style={{ fontSize: 13, color: "#065F46", lineHeight: 1.6 }}>
+          ✅ Un récapitulatif de vos aides a été envoyé à <strong>{data.email}</strong> et à votre conseiller Vivalea.
+          Vous serez recontacté(e) sous <strong>48 h</strong>.
+        </div>
       </div>
 
-      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 11, color: "#6B7280", textAlign: "center" }}>
-          Email récapitulatif envoyé à <strong style={{ color: "#18263F" }}>{data.email}</strong>
-        </div>
+      <div style={{ marginTop: 12 }}>
         <button onClick={onReset} style={{ ...S.backBtn, width: "100%", textAlign: "center" }}>
           Nouvelle simulation
         </button>
@@ -1170,33 +1667,18 @@ function ResultScreen({ data, onReset }) {
   );
 }
 
-// ── OVERLAY ENVOI ────────────────────────────────────────────
-
-function ConfirmationOverlay({ visible }) {
-  if (!visible) return null;
-  return (
-    <div style={S.confirmOverlay}>
-      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#8F1349" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 14 }}>
-        <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
-      </svg>
-      <h3 style={{ ...S.question, fontSize: 18 }}>Calcul en cours…</h3>
-      <p style={{ color: "#6B7280", fontSize: 13 }}>Nous préparons votre bilan d'aides personnalisé.</p>
-    </div>
-  );
-}
-
 // ── MAIN APP ────────────────────────────────────────────────
 
 function SimulateurAides() {
-  const [step,      setStep]      = useState(0);
-  const [data,      setData]      = useState({});
-  const [errors,    setErrors]    = useState({});
-  const [submitted, setSubmitted] = useState(false);
-  const [sending,   setSending]   = useState(false);
-  const bodyRef = useRef(null);
-  // Valeur du champ auto-advance au moment où l'on entre dans l'étape.
-  // L'auto-avance ne se déclenche QUE si la valeur a changé depuis l'entrée.
-  const stepEntryValue = useRef(null);
+  const [step,             setStep]             = useState(0);
+  const [data,             setData]             = useState({});
+  const [errors,           setErrors]           = useState({});
+  const [showResults,      setShowResults]      = useState(false);  // affiche ResultScreen
+  const [contactSubmitted, setContactSubmitted] = useState(false);  // formulaire contact soumis
+  const [sending,          setSending]          = useState(false);
+  const bodyRef          = useRef(null);
+  const stepEntryValue   = useRef(null);
+  const stepEntryAidant  = useRef(null);  // pour éviter auto-advance au retour étape 1
 
   const onChange = (field, value) => {
     setData(prev => ({ ...prev, [field]: value }));
@@ -1204,15 +1686,19 @@ function SimulateurAides() {
   };
 
   const canGoNext = () => {
+    const deptValid = data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
     switch (step) {
       case 0: return !!data.age;
-      case 1: return !!data.situation;
+      case 1: return !!data.situation && (data.situation === "prevention" || !!data.aidant);
       case 2: return !!data.statut;
-      case 3: return data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
-      case 4: return !!data.occupants;
-      case 5: return !!data.revenus;
-      case 6: return !!data.profil;
-      case 7: return !!data.nom && !!data.telephone && !!data.email && (data.isPartenaire || !!data.source);
+      case 3: return deptValid && !!data.occupants;  // foyer fusionné
+      case 4: return !!data.revenus;
+      case 5: return !!data.profil;
+      case 6: return !!data.objectif;
+      case 7: return !!data.nom && !!data.telephone && !!data.email &&
+                     (data.isPartenaire
+                       ? (!!data.partenaireEntreprise && !!data.partenaireNom)
+                       : !!data.source);
       default: return false;
     }
   };
@@ -1224,12 +1710,12 @@ function SimulateurAides() {
       errs.telephone = "Ce champ est obligatoire.";
     } else {
       const _t = data.telephone.trim().replace(/[\s.\-()+]/g, "");
-      // Accepte : 06/07XXXXXXXX · +336/+337XXXXXXXX · 00336/00337XXXXXXXX
       if (!/^(?:0033|33)?0?[67]\d{8}$/.test(_t)) errs.telephone = "Merci de saisir un numéro de portable (06 ou 07).";
     }
-    if (!data.email?.trim())     errs.email     = "Ce champ est obligatoire.";
+    if (!data.email?.trim())   errs.email  = "Ce champ est obligatoire.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) errs.email = "Email invalide.";
     if (!data.isPartenaire && !data.source) errs.source = "Ce champ est obligatoire.";
+    // Consentement RGPD implicite au clic sur "Voir mes aides →"
     if (data.isPartenaire) {
       if (!data.partenaireEntreprise?.trim()) errs.partenaireEntreprise = "Ce champ est obligatoire.";
       if (!data.partenaireNom?.trim())        errs.partenaireNom        = "Ce champ est obligatoire.";
@@ -1241,39 +1727,57 @@ function SimulateurAides() {
     const errs = validateContact();
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
 
-    setSending(true);
-    const { aides, totalSubventions } = computeAides(data);
-    const aidesEligibles = aides.filter(a => a.eligible && a.niveau !== "non");
-    const aidesListStr   = aidesEligibles.map(a => `${a.nom} (${a.montantLabel})`).join(" | ");
+    // Affiche les résultats immédiatement — email part en arrière-plan
+    setContactSubmitted(true);
+    setShowResults(true);
+
+    const { aides, totalLogement: totalLog } = computeAides(data);
     const mpa = aides.find(a => a.id === "maprimeadapt");
-    const mpaLabel = mpa?.niveau === "fort" ? "Éligible (très modeste)" : mpa?.niveau === "moyen" ? "Éligible (modeste)" : "Non éligible MaPrimeAdapt'";
+
+    // Aides à envoyer : fort + moyen + info (tout ce qui est visible dans les résultats)
+    const aidesVisibles = aides.filter(a => a.eligible && a.niveau !== "non");
+    const aidesEligibles = aidesVisibles.filter(a => a.niveau === "fort" || a.niveau === "moyen");
+
+    // Données structurées pour les emails (JSON)
+    const aidesJson = JSON.stringify(aidesVisibles.map(a => ({
+      nom:          a.nom,
+      organisme:    a.organisme || "",
+      montantLabel: a.montantLabel,
+      niveau:       a.niveau,
+      categorie:    a.categorie,
+    })));
+
+    const mpaLabel = mpa?.niveau === "fort"
+      ? `Éligible — ${mpa.taux}`
+      : mpa?.niveau === "moyen"
+        ? `Probable — ${mpa.taux}`
+        : "Non éligible MaPrimeAdapt'";
 
     const templateParams = {
-      lead_nom:          data.nom,
-      lead_telephone:    data.telephone,
-      lead_email:        data.email,
-      lead_source:       data.source || "Non renseigné",
-      sim_age:           data.age === "60_plus" ? "60 ans ou plus" : "Moins de 60 ans",
-      sim_situation:     SITUATION_OPTIONS.find(o => o.value === data.situation)?.label || data.situation,
-      sim_statut:        HOUSING_OPTIONS.find(o => o.value === data.statut)?.label || data.statut,
-      sim_departement:   data.departement,
-      sim_occupants:     data.occupants,
-      sim_revenus:       getIncomeOptions(data.occupants, data.departement).find(o => o.value === data.revenus)?.label || data.revenus,
-      sim_profil:        PROFIL_OPTIONS.find(o => o.value === data.profil)?.label || data.profil,
-      sim_aides:         aidesListStr,
-      sim_nb_aides:      String(aides.filter(a => a.eligible && (a.niveau === "fort" || a.niveau === "moyen")).length),
-      sim_montant_total: totalSubventions > 0
-        ? `jusqu'à ${totalSubventions.toLocaleString("fr-FR")} €` : "À estimer",
-      sim_eligibilite:   mpaLabel, // rétrocompatibilité
-      timestamp:         new Date().toLocaleString("fr-FR"),
-      to_email:          RECIPIENT_EMAIL,
-      partenaire:        data.isPartenaire ? "oui" : "non",
+      lead_nom:              data.nom,
+      lead_telephone:        data.telephone,
+      lead_email:            data.email,
+      lead_source:           data.source || (data.isPartenaire ? "Partenaire" : "Non renseigné"),
+      sim_age:               data.age === "70_plus" ? "70 ans ou plus" : data.age === "60_69" ? "60 à 69 ans" : "Moins de 60 ans",
+      sim_objectif:          OBJECTIF_OPTIONS.find(o => o.value === data.objectif)?.label || data.objectif || "Non renseigné",
+      sim_situation:         SITUATION_OPTIONS.find(o => o.value === data.situation)?.label || data.situation,
+      sim_statut:            HOUSING_OPTIONS.find(o => o.value === data.statut)?.label || data.statut,
+      sim_departement:       data.departement,
+      sim_occupants:         data.occupants,
+      sim_revenus:           getIncomeOptions(data.occupants, data.departement).find(o => o.value === data.revenus)?.label || data.revenus,
+      sim_profil:            PROFIL_OPTIONS.find(o => o.value === data.profil)?.label || data.profil,
+      sim_aides_json:        aidesJson,
+      sim_nb_aides:          String(aidesEligibles.length),
+      sim_total_logement:    totalLog > 0 ? `jusqu'à ${totalLog.toLocaleString("fr-FR")} €` : "",
+      sim_eligibilite:       mpaLabel,
+      timestamp:             new Date().toLocaleString("fr-FR"),
+      to_email:              RECIPIENT_EMAIL,
+      partenaire:            data.isPartenaire ? "oui" : "non",
       partenaire_entreprise: data.isPartenaire ? (data.partenaireEntreprise || "") : "",
-      partenaire_nom:    data.isPartenaire ? (data.partenaireNom || "") : "",
-      // Précisions situation (facultatif)
-      prec_ergo_rapport: data.ergo_rapport || "—",
-      prec_chute_hospi:  data.chute_hospi  || "—",
-      prec_aidant:       data.aidant        || "—",
+      partenaire_nom:        data.isPartenaire ? (data.partenaireNom || "") : "",
+      prec_ergo_rapport:     data.ergo_rapport || "—",
+      prec_chute_hospi:      data.chute_hospi  || "—",
+      prec_aidant:           data.aidant        || "—",
     };
 
     try {
@@ -1287,49 +1791,73 @@ function SimulateurAides() {
     }
 
     setSending(false);
-    setSubmitted(true);
   };
 
   const goNext = () => {
     if (step === 7) { handleSubmit(); return; }
     if (canGoNext()) setStep(s => s + 1);
   };
-  const goBack  = () => setStep(s => Math.max(0, s - 1));
-  const reset   = () => { setStep(0); setData({}); setErrors({}); setSubmitted(false); };
+  const goBack = () => setStep(s => Math.max(0, s - 1));
+  const reset  = () => { setStep(0); setData({}); setErrors({}); setShowResults(false); setContactSubmitted(false); };
 
-  // Enregistre la valeur du champ à l'entrée de chaque étape
-  // (doit être déclaré AVANT l'effet d'auto-avance pour garantir l'ordre d'exécution React)
+  // Enregistre les valeurs à l'entrée de chaque étape (évite faux positifs auto-advance au retour)
   useEffect(() => {
-    const autoFields = { 0: "age", 2: "statut", 4: "occupants", 5: "revenus", 6: "profil" };
+    const autoFields = { 0: "age", 2: "statut", 4: "revenus", 5: "profil", 6: "objectif" };
     const field = autoFields[step];
-    stepEntryValue.current = field ? (data[field] || null) : null;
-  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+    stepEntryValue.current  = field ? (data[field] || null) : (step === 1 ? (data.situation || null) : null);
+    stepEntryAidant.current = step === 1 ? (data.aidant || null) : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
-  // Auto-avance UNIQUEMENT si la sélection est nouvelle (différente de la valeur à l'entrée)
+  // Auto-avance — steps à choix unique (hors 1 et 3 qui ont leur propre logique)
   useEffect(() => {
-    const autoFields = { 0: "age", 2: "statut", 4: "occupants", 5: "revenus", 6: "profil" };
+    const autoFields = { 0: "age", 2: "statut", 4: "revenus", 5: "profil", 6: "objectif" };
     const field = autoFields[step];
     if (field && data[field] && data[field] !== stepEntryValue.current) {
       const t = setTimeout(() => setStep(s => s + 1), 380);
       return () => clearTimeout(t);
     }
-  }, [data.age, data.situation, data.statut, data.occupants, data.revenus, data.profil, step]);
+  }, [data.age, data.statut, data.revenus, data.profil, data.objectif, step]);
+
+  // Auto-avance étape 1 (Situation) :
+  // - Prévention → dès que la situation est choisie
+  // - Autres → seulement quand "aidant au quotidien" est répondu
+  useEffect(() => {
+    if (step !== 1) return;
+    if (data.situation === "prevention" && data.situation !== stepEntryValue.current) {
+      const t = setTimeout(() => setStep(s => s + 1), 380);
+      return () => clearTimeout(t);
+    }
+    if (data.situation && data.situation !== "prevention" && data.aidant && data.aidant !== stepEntryAidant.current) {
+      const t = setTimeout(() => setStep(s => s + 1), 380);
+      return () => clearTimeout(t);
+    }
+  }, [data.situation, data.aidant, step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-avance step 3 (foyer) : dès que occupants est choisi ET département valide
+  useEffect(() => {
+    if (step !== 3) return;
+    const deptValid = data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
+    if (deptValid && data.occupants) {
+      const t = setTimeout(() => setStep(s => s + 1), 380);
+      return () => clearTimeout(t);
+    }
+  }, [data.occupants, data.departement, step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bodyRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
-  }, [step]);
+  }, [step, showResults]);
 
   const renderStep = () => {
-    if (submitted) return <ResultScreen data={data} onReset={reset} />;
     switch (step) {
-      case 0: return <StepAge         data={data} onChange={onChange} />;
-      case 1: return <StepSituation   data={data} onChange={onChange} />;
-      case 2: return <StepStatut      data={data} onChange={onChange} />;
-      case 3: return <StepDepartement data={data} onChange={onChange} />;
-      case 4: return <StepOccupants   data={data} onChange={onChange} />;
-      case 5: return <StepRevenus     data={data} onChange={onChange} />;
-      case 6: return <StepProfil      data={data} onChange={onChange} />;
-      case 7: return <StepContact     data={data} onChange={onChange} errors={errors} />;
+      case 0: return <StepAge       data={data} onChange={onChange} />;
+      case 1: return <StepSituation data={data} onChange={onChange} />;
+      case 2: return <StepStatut    data={data} onChange={onChange} />;
+      case 3: return <StepFoyer     data={data} onChange={onChange} />;
+      case 4: return <StepRevenus   data={data} onChange={onChange} />;
+      case 5: return <StepProfil    data={data} onChange={onChange} />;
+      case 6: return <StepObjectif  data={data} onChange={onChange} />;
+      case 7: return <StepContact   data={data} onChange={onChange} errors={errors} />;
       default: return null;
     }
   };
@@ -1344,37 +1872,54 @@ function SimulateurAides() {
       `}</style>
       <div style={S.wrapper}>
         <div style={S.container}>
-          <ConfirmationOverlay visible={sending} />
 
           <div style={S.header}>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center" }}>
               <span style={{ fontFamily: "'DM Serif Display', serif", fontSize: 28, fontWeight: 400, color: "#8F1349", letterSpacing: "-0.01em" }}>Vivalea</span>
             </div>
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 6 }}>
-              Simulateur d'aides — Seniors &amp; Handicap
+              Simulateur d'aides — Maintien à domicile
             </div>
-            <div style={S.badge}>Gratuit · Sans engagement · Confidentiel</div>
+            <div style={S.badge}>Seniors · Handicap · Aidants · Gratuit · Confidentiel</div>
           </div>
 
-          {!submitted && <ProgressBar step={step} />}
+          {!showResults && <ProgressBar step={step} />}
 
-          <div style={S.body} ref={bodyRef} key={step}>
+          <div style={S.body} ref={bodyRef} key={showResults ? "results" : step}>
             <div style={{ animation: "fadeIn 0.35s ease" }}>
-              {renderStep()}
+              {showResults
+                ? <ResultScreen
+                    data={data}
+                    onReset={reset}
+                  />
+                : renderStep()
+              }
             </div>
-            {!submitted && (
-              <NavButtons
-                showBack={step > 0} onBack={goBack} onNext={goNext}
-                canGoNext={canGoNext()}
-                nextLabel={step === 7 ? "Découvrir mes aides" : "Continuer"}
-              />
+            {!showResults && (
+              <>
+                <NavButtons
+                  showBack={step > 0} onBack={goBack} onNext={goNext}
+                  canGoNext={canGoNext()}
+                  nextLabel={step === 7 ? "Voir mes aides →" : "Continuer"}
+                />
+                {step === 7 && (
+                  <p style={{
+                    fontSize: 11, color: "#9CA3AF", textAlign: "center",
+                    marginTop: 8, lineHeight: 1.5, padding: "0 8px",
+                  }}>
+                    En cliquant sur « Voir mes aides », j'accepte que Vivalea utilise mes coordonnées
+                    pour me recontacter au sujet de mes droits et des aides disponibles pour le maintien
+                    à domicile. (Données traitées conformément au RGPD — aucune transmission à des tiers.)
+                  </p>
+                )}
+              </>
             )}
           </div>
 
           <div style={S.footer}>
             <p style={S.footerText}>
               Vivalea · Entreprise à impact et ESS · Simulation indicative, non contractuelle.
-              <br />Vos données sont traitées de manière confidentielle.
+              <br />Vos données sont traitées conformément au RGPD.
             </p>
           </div>
         </div>
