@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simulateur MaPrimeAdapt' - Vivalea</title>
-  <meta name="description" content="Testez votre éligibilité à MaPrimeAdapt' en quelques clics. Simulateur gratuit par Vivalea.">
+  <title>Simulateur d'aides — Seniors &amp; Handicap · Vivalea</title>
+  <meta name="description" content="Découvrez toutes vos aides pour adapter votre logement : MaPrimeAdapt', APA, PCH, crédit d'impôt, CARSAT… Simulation gratuite par Vivalea.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -16,13 +16,10 @@
     body { font-family: 'DM Sans', 'Segoe UI', sans-serif; background: #F8F6F4; overflow-x: hidden; }
   </style>
   <script>
-    // Auto-resize iframe — v2 (fix: hauteur minimale + polling post-React)
-    // Bug v1 : DOMContentLoaded arrivait avant le render React → height=0+60=60px
-    //          → Webflow écrasait l'iframe à 60px → formulaire invisible
+    // Auto-resize iframe — v2
     (function () {
       var lastHeight = 0;
       var MIN_HEIGHT = 600;
-
       function sendHeight() {
         var rootEl = document.getElementById('root');
         if (!rootEl) return;
@@ -35,8 +32,6 @@
           }
         }
       }
-
-      // Polling : attend que React ait peuplé #root avant d'observer
       var pollCount = 0;
       var pollInterval = setInterval(function () {
         var rootEl = document.getElementById('root');
@@ -49,10 +44,7 @@
         }
         if (++pollCount > 50) clearInterval(pollInterval);
       }, 100);
-
-      // Envoi immédiat avec hauteur minimale (évite iframe écrasée)
       window.addEventListener('DOMContentLoaded', sendHeight);
-      // Envoi différé après fonts
       window.addEventListener('load', function () { setTimeout(sendHeight, 500); });
     })();
   </script>
@@ -60,170 +52,400 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-const { useState, useEffect, useRef, Fragment } = React;
+const { useState, useEffect, useRef } = React;
 
-// ── CONFIG EmailJS ──────────────────────────────────────────
-const EMAILJS_PUBLIC_KEY = "NkeIMabZ5jVKjFjKu";
-const EMAILJS_SERVICE_ID = "service_jo37wws";
-const EMAILJS_TEMPLATE_NOTIF = "template_427e77g";  // notification interne
-const EMAILJS_TEMPLATE_LEAD = "template_8maoisj";   // récap au lead
-const RECIPIENT_EMAIL = "lea@vivalea.fr";
-// ────────────────────────────────────────────────────────────
+// ── CONSTANTS ────────────────────────────────────────────────
 
 const STEPS = [
-  { id: "age", label: "Âge" },
-  { id: "statut", label: "Logement" },
-  { id: "departement", label: "Département" },
-  { id: "occupants", label: "Foyer" },
-  { id: "revenus", label: "Revenus" },
-  { id: "contact", label: "Résultats" },
+  { id: "age",         label: "Âge" },
+  { id: "situation",   label: "Situation" },
+  { id: "statut",      label: "Logement" },
+  { id: "departement", label: "Dépt." },
+  { id: "occupants",   label: "Foyer" },
+  { id: "revenus",     label: "Revenus" },
+  { id: "profil",      label: "Profil" },
+  { id: "contact",     label: "Contact" },
 ];
-
-// MaPrimeAdapt' income thresholds (from competitor screenshots)
-const INCOME_THRESHOLDS = {
-  veryModest: 42357,
-  modest: 51564,
-};
-
-const DEPARTMENTS_IDF = ["75", "77", "78", "91", "92", "93", "94", "95"];
 
 const HOUSING_OPTIONS = [
   { value: "proprietaire_occupant", label: "Propriétaire occupant" },
   { value: "proprietaire_bailleur", label: "Propriétaire bailleur" },
-  { value: "locataire_prive", label: "Locataire d'un logement privé" },
-  { value: "locataire_social", label: "Locataire d'un logement social" },
-  { value: "autre", label: "Autre / je ne sais pas" },
+  { value: "locataire_prive",       label: "Locataire d'un logement privé" },
+  { value: "locataire_social",      label: "Locataire d'un logement social" },
+  { value: "autre",                 label: "Autre / je ne sais pas" },
+];
+
+const SITUATION_OPTIONS = [
+  { value: "perte_severe", label: "Perte d'autonomie importante",   hint: "GIR 1 à 4 — dépendance modérée à totale" },
+  { value: "perte_legere", label: "Légère perte d'autonomie",        hint: "GIR 5-6 — autonomie globalement préservée" },
+  { value: "handicap",     label: "Situation de handicap reconnue", hint: "Avec ou en cours de reconnaissance MDPH" },
+  { value: "prevention",   label: "Prévention / anticipation",       hint: "Adapter le logement avant toute perte d'autonomie" },
 ];
 
 const OCCUPANTS_OPTIONS = ["1", "2", "3", "4", "5", "6+"];
 
-const INCOME_OPTIONS = [
-  { value: "very_modest", label: `Inférieur à ${INCOME_THRESHOLDS.veryModest.toLocaleString("fr-FR")} €` },
-  { value: "modest", label: `Entre ${INCOME_THRESHOLDS.veryModest.toLocaleString("fr-FR")} € et ${INCOME_THRESHOLDS.modest.toLocaleString("fr-FR")} €` },
-  { value: "above", label: `Supérieur à ${INCOME_THRESHOLDS.modest.toLocaleString("fr-FR")} €` },
-];
+// ── BARÈME FRANCE RÉNOV' (revenus très modestes / modestes) ──
+// Source : france-renov.gouv.fr/bareme
+const IDF_DEPTS = ["75","77","78","91","92","93","94","95"];
 
-const SOURCE_OPTIONS = [
-  "Recherche Google",
-  "Réseaux sociaux",
-  "Bouche à oreille",
-  "Professionnel de santé",
-  "Mairie / CCAS",
-  "Autre",
-];
+const BAREME = {
+  horsidf: {
+    veryModest: [17363, 25393, 30540, 35676, 40835],
+    modest:     [22259, 32553, 39148, 45735, 52348],
+    incVM: 5151, incM: 6598,
+  },
+  idf: {
+    veryModest: [24031, 35270, 42357, 49455, 56580],
+    modest:     [29253, 42933, 51564, 60208, 68877],
+    incVM: 7116, incM: 8663,
+  },
+};
 
-function getEligibility(data) {
-  if (data.revenus === "very_modest") return { percent: 70, level: "very_modest" };
-  if (data.revenus === "modest") return { percent: 50, level: "modest" };
-  return { percent: 0, level: "above" };
-}
-
-function getResultMessage(eligibility, data) {
-  const { percent, level } = eligibility;
-  if (percent === 70) {
-    return {
-      headline: "Bonne nouvelle !",
-      status: "Vous êtes éligible",
-      subline: "D'après les informations renseignées, vous pourriez bénéficier de MaPrimeAdapt' pour financer vos travaux d'adaptation.",
-      detail: "Avec MaPrimeAdapt', l'État prend en charge une grande partie de vos travaux pour sécuriser votre logement : douche accessible, barres d'appui, suppression des marches, éclairage adapté…",
-      cta: "Un conseiller Vivalea vous recontacte gratuitement pour vous informer précisément le montant de vos aides et vous accompagner dans vos démarches.",
-      color: "#E9552E",
-      bg: "#F8F6F4",
-      eligible: true,
-    };
-  }
-  if (percent === 50) {
-    return {
-      headline: "Vous êtes éligible !",
-      status: "Vous êtes éligible",
-      subline: "D'après les informations renseignées, vous pourriez bénéficier de MaPrimeAdapt' pour financer vos travaux d'adaptation.",
-      detail: "Notre équipe peut aussi identifier d'autres aides complémentaires (APA, caisses de retraite, aides locales) pour réduire encore votre reste à charge.",
-      cta: "Un conseiller Vivalea vous rappelle sous 48h pour faire le point ensemble, gratuitement et sans engagement.",
-      color: "#E9552E",
-      bg: "#F8F6F4",
-      eligible: true,
-    };
-  }
+function getRevenusThresholds(occupants, dep) {
+  const b = IDF_DEPTS.includes(String(dep)) ? BAREME.idf : BAREME.horsidf;
+  const raw = occupants === "6+" ? 6 : parseInt(occupants, 10) || 1;
+  const idx  = Math.min(raw - 1, 4);
+  const extra = raw > 5 ? raw - 5 : 0;
   return {
-    headline: "Votre situation",
-    status: "Non éligible",
-    subline: "D'après les informations renseignées, vous ne semblez pas éligible à MaPrimeAdapt' pour le moment.",
-    detail: "Mais d'autres aides existent ! Selon votre situation, vous pourriez bénéficier de l'APA, de la PCH, d'aides de votre caisse de retraite ou de dispositifs locaux. Notre équipe peut vous aider à y voir clair.",
-    cta: "Un conseiller Vivalea fera le point avec vous gratuitement sur toutes les aides possibles.",
-    color: "#8F1349",
-    bg: "#F8F6F4",
-    eligible: false,
+    veryModest: b.veryModest[idx] + extra * b.incVM,
+    modest:     b.modest[idx]     + extra * b.incM,
   };
 }
 
+function getIncomeOptions(occupants, dep) {
+  const { veryModest, modest } = getRevenusThresholds(occupants, dep);
+  const fmtVM = veryModest.toLocaleString("fr-FR");
+  const fmtM  = modest.toLocaleString("fr-FR");
+  return [
+    { value: "very_modest", label: `Inférieur à ${fmtVM} €` },
+    { value: "modest",      label: `Entre ${fmtVM} € et ${fmtM} €` },
+    { value: "above",       label: `Supérieur à ${fmtM} €` },
+  ];
+}
+
+// Fallback pour affichages qui n'ont pas encore occupants/dep
+const INCOME_OPTIONS = getIncomeOptions("1", "");
+
+const PROFIL_OPTIONS = [
+  { value: "retraite",      label: "Retraité(e)" },
+  { value: "salarie",       label: "Salarié(e) — secteur privé" },
+  { value: "fonctionnaire", label: "Fonctionnaire / secteur public" },
+  { value: "autre",         label: "Autre / sans activité" },
+];
+
+const SOURCE_OPTIONS = [
+  "Recherche Google", "Réseaux sociaux", "Bouche à oreille",
+  "Professionnel de santé", "Mairie / CCAS", "Autre",
+];
+
+const NIVEAU_CONFIG = {
+  fort:  { color: "#059669", bg: "#ECFDF5", label: "ÉLIGIBLE" },
+  moyen: { color: "#E9552E", bg: "#FFF1E4", label: "PROBABLE" },
+  info:  { color: "#3B82F6", bg: "#EFF6FF", label: "APPLICABLE" },
+  non:   { color: "#9CA3AF", bg: "#F3F4F6", label: "NON ÉLIGIBLE" },
+};
+
+const RECIPIENT_EMAIL = "lea@vivalea.fr";
+
+// ── AIDES LOCALES PAR DÉPARTEMENT ───────────────────────────
+
+function getLocalAideInfo(dep) {
+  const n = parseInt(dep, 10) || 0;
+
+  if (dep === "75") return {
+    organisms: "DASES · Paris Habitat",
+    description: "La Ville de Paris propose une aide à l'adaptation via le dispositif PAPA (Programme d'Adaptation du logement des Personnes Agées). Cumulable avec les aides nationales.",
+    contact: "dases.paris.fr · 01 40 28 40 28",
+    montantLocal: "jusqu'à 10 000 €",
+  };
+  if ([77, 78, 91, 92, 93, 94, 95].includes(n)) return {
+    organisms: "Conseil Départemental + Commune + ANAH locale",
+    description: `Le département (${dep}) et les communes franciliennes disposent d'aides complémentaires pour l'adaptation du logement. Île-de-France Énergies accompagne aussi certains travaux.`,
+    contact: "Votre CCAS communal · iledefrance-energies.fr",
+    montantLocal: "Variable selon commune",
+  };
+  if (dep === "69") return {
+    organisms: "Métropole de Lyon · Conseil Départemental du Rhône",
+    description: "La Métropole de Lyon propose des aides à l'adaptation via son programme Réhabilitation Habitat, en complément des dispositifs nationaux.",
+    contact: "grandlyon.com · rhone.fr",
+    montantLocal: "jusqu'à 3 000 €",
+  };
+  if (dep === "13") return {
+    organisms: "Métropole Aix-Marseille-Provence · PACT 13",
+    description: "La Métropole AMP et le PACT 13 accompagnent les projets d'adaptation dans le cadre du programme local Habiter Mieux.",
+    contact: "pact-amsm.org · metropoleapm.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "59") return {
+    organisms: "MEL (Métropole Europ. de Lille) · Conseil Dép. du Nord",
+    description: "La MEL et le Département du Nord proposent des aides complémentaires pour l'adaptation du logement des seniors et personnes handicapées.",
+    contact: "lillemetropole.fr · lenord.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "33") return {
+    organisms: "Bordeaux Métropole · Conseil Départemental Gironde",
+    description: "Bordeaux Métropole et la Gironde accompagnent les projets d'adaptation en partenariat avec l'ANAH locale et les CCAS du territoire.",
+    contact: "bordeaux-metropole.fr · gironde.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "31") return {
+    organisms: "Toulouse Métropole · Conseil Dép. Haute-Garonne",
+    description: "Toulouse Métropole et le Département proposent des dispositifs complémentaires pour l'amélioration et l'adaptation du logement.",
+    contact: "toulouse-metropole.fr · haute-garonne.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "67") return {
+    organisms: "Eurométropole de Strasbourg · ADIL 67",
+    description: "L'Eurométropole de Strasbourg et l'ADIL 67 conseillent et accompagnent les projets d'adaptation du logement.",
+    contact: "strasbourg.eu · adil67.org",
+    montantLocal: "Variable",
+  };
+  if (dep === "06") return {
+    organisms: "Métropole Nice Côte d'Azur · CRAM Prov.-Alpes",
+    description: "La Métropole NCA propose des aides à l'amélioration de l'habitat pour les résidents âgés ou handicapés du territoire.",
+    contact: "metropole.nice.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "44") return {
+    organisms: "Nantes Métropole Habitat · Conseil Dép. Loire-Atlantique",
+    description: "Nantes Métropole et le Département proposent des aides à l'adaptation en complément des dispositifs nationaux.",
+    contact: "nantesmetropole.fr · loire-atlantique.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "38") return {
+    organisms: "Grenoble Alpes Métropole · Conseil Dép. Isère",
+    description: "La Métropole grenobloise et le Département disposent de programmes d'aide à l'adaptation et l'amélioration de l'habitat.",
+    contact: "grenoble-alpes-metropole.fr · isere.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "34") return {
+    organisms: "Montpellier Méditerranée Métropole · Hérault",
+    description: "La Métropole de Montpellier et le Département de l'Hérault proposent des aides complémentaires pour l'adaptation du logement.",
+    contact: "montpellier3m.fr · herault.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "76") return {
+    organisms: "Métropole Rouen Normandie · Conseil Dép. Seine-Maritime",
+    description: "La Métropole rouennaise accompagne l'adaptation du logement dans le cadre de son programme habitat.",
+    contact: "metropole-rouen-normandie.fr",
+    montantLocal: "Variable",
+  };
+  if (dep === "57") return {
+    organisms: "Eurométropole de Metz · Moselle",
+    description: "L'Eurométropole de Metz et le Conseil Départemental de la Moselle proposent des aides locales à l'adaptation.",
+    contact: "eurometropole-metz.fr · moselle.fr",
+    montantLocal: "Variable",
+  };
+  if (n >= 971 && n <= 976) return {
+    organisms: "DEAL · ANAH Outre-Mer · Collectivité Territoriale",
+    description: "Des aides spécifiques existent en Outre-Mer dans le cadre du programme LHI (Lutte contre l'Habitat Indigne) et des dispositifs des collectivités locales, avec des plafonds majorés.",
+    contact: "Votre CCAS + Préfecture locale + CTM/CTG",
+    montantLocal: "Aides majorées DOM",
+  };
+  // Fallback générique
+  return {
+    organisms: `Conseil Dép. ${dep} · Commune · CCAS · CAF`,
+    description: `Des aides complémentaires peuvent exister dans votre département (${dep}) et votre commune. Le CCAS de votre mairie est le premier interlocuteur : il recense les dispositifs locaux disponibles.`,
+    contact: "Votre CCAS de mairie + ANAH délégation territoriale (anah.fr)",
+    montantLocal: "Variable selon commune",
+  };
+}
+
+// ── MOTEUR D'ÉLIGIBILITÉ ─────────────────────────────────────
+
+function computeAides(data) {
+  const age60plus        = data.age === "60_plus";
+  const situationSevere  = data.situation === "perte_severe";
+  const situationLegere  = data.situation === "perte_legere";
+  const isHandicap       = data.situation === "handicap";
+
+  const isProprietaire   = data.statut === "proprietaire_occupant";
+  const isLocatairePrive = data.statut === "locataire_prive";
+
+  const revenusTresModeste = data.revenus === "very_modest";
+  const revenusAudessus    = data.revenus === "above";
+
+  const isRetraite = data.profil === "retraite";
+  const isSalarie  = data.profil === "salarie";
+
+  const aides = [];
+
+  // 1. MaPrimeAdapt'
+  if ((isProprietaire || isLocatairePrive) && !revenusAudessus) {
+    const taux    = revenusTresModeste ? 70 : 50;
+    const montant = revenusTresModeste ? 22000 : 14000;
+    aides.push({
+      id: "maprimeadapt", nom: "MaPrimeAdapt'", organisme: "ANAH / État",
+      eligible: true, niveau: revenusTresModeste ? "fort" : "moyen",
+      montantMax: montant,
+      montantLabel: `jusqu'à ${montant.toLocaleString("fr-FR")} €`,
+      taux: `${taux} % des travaux HT pris en charge`,
+      description: `Aide nationale pour les travaux d'adaptation du logement. Prise en charge à ${taux} % du montant HT.`,
+      condition: revenusTresModeste ? "Ménage à revenus très modestes (barème ANAH)" : "Ménage à revenus modestes (barème ANAH)",
+    });
+  } else {
+    const raison = revenusAudessus
+      ? "Revenus dépassant les plafonds ANAH"
+      : `Statut "${HOUSING_OPTIONS.find(o => o.value === data.statut)?.label}" non éligible`;
+    aides.push({
+      id: "maprimeadapt", nom: "MaPrimeAdapt'", organisme: "ANAH / État",
+      eligible: false, niveau: "non", montantMax: 0, montantLabel: "Non éligible",
+      taux: "",
+      description: "Réservée aux propriétaires occupants et locataires du parc privé avec revenus modestes.",
+      condition: raison,
+    });
+  }
+
+  // 2. APA — volet adaptation du logement
+  if (age60plus && (situationSevere || situationLegere)) {
+    const montant = situationSevere ? 7000 : 3500;
+    aides.push({
+      id: "apa", nom: "APA — Volet adaptation du logement", organisme: "Conseil Départemental",
+      eligible: true, niveau: situationSevere ? "fort" : "moyen",
+      montantMax: montant,
+      montantLabel: `jusqu'à ${montant.toLocaleString("fr-FR")} €`,
+      taux: "Selon GIR et revenus du bénéficiaire",
+      description: "L'Aide Personnalisée d'Autonomie peut financer des travaux d'adaptation du logement en complément des autres aides.",
+      condition: situationSevere ? "Perte d'autonomie GIR 1 à 4 — 60 ans ou plus" : "Perte d'autonomie GIR 5-6 — 60 ans ou plus",
+    });
+  }
+
+  // 3. PCH — aménagement du logement
+  if (isHandicap) {
+    if (!age60plus) {
+      aides.push({
+        id: "pch", nom: "PCH — Aménagement du logement", organisme: "MDPH",
+        eligible: true, niveau: "fort", montantMax: 10000,
+        montantLabel: "jusqu'à 10 000 €",
+        taux: "100 % des dépenses dans la limite du plafond",
+        description: "La Prestation de Compensation du Handicap prend en charge les travaux d'accessibilité et d'adaptation du logement.",
+        condition: "Reconnaissance MDPH — moins de 60 ans",
+      });
+    } else {
+      aides.push({
+        id: "pch", nom: "PCH — Maintien des droits après 60 ans", organisme: "MDPH",
+        eligible: true, niveau: "moyen", montantMax: 10000,
+        montantLabel: "jusqu'à 10 000 €",
+        taux: "Si droits PCH ouverts avant 60 ans",
+        description: "La PCH peut être maintenue après 60 ans si les droits ont été ouverts avant cet âge. À vérifier auprès de votre MDPH.",
+        condition: "Handicap reconnu avant 60 ans — maintien à confirmer avec la MDPH",
+      });
+    }
+  }
+
+  // 4. Crédit d'impôt adaptation
+  // Éligible : 60 ans ou plus, OU perte d'autonomie, OU handicap reconnu.
+  // Pour "prévention" sans perte d'autonomie et moins de 60 ans : non applicable légalement.
+  // En revanche, pour les revenus >plafonds ANAH (non éligibles MaPrimeAdapt') avec 60+/autonomie, c'est souvent l'aide principale.
+  if (age60plus || situationSevere || situationLegere || isHandicap) {
+    const estAlternativePrincipale = !((isProprietaire || isLocatairePrive) && !revenusAudessus);
+    aides.push({
+      id: "credit_impot", nom: "Crédit d'impôt adaptation", organisme: "Finances Publiques",
+      eligible: true, niveau: estAlternativePrincipale ? "fort" : "moyen",
+      montantMax: 2500,
+      montantLabel: "jusqu'à 2 500 €",
+      taux: "25 % des dépenses (plafond 5 000 € / personne)",
+      description: estAlternativePrincipale
+        ? "En l'absence de MaPrimeAdapt', le crédit d'impôt est une aide directe accessible à tous pour financer les équipements d'adaptation. Valable même pour les revenus élevés."
+        : "Crédit d'impôt pour l'installation d'équipements spécialement conçus pour les personnes âgées ou handicapées.",
+      condition: "Propriétaires et locataires imposables — aucune condition de revenus",
+    });
+  }
+
+  // 5. TVA réduite (toujours applicable)
+  aides.push({
+    id: "tva", nom: "TVA à taux réduit — 5,5 %", organisme: "État",
+    eligible: true, niveau: "info", montantMax: 0,
+    montantLabel: "Économie sur la facture artisan",
+    taux: "5,5 % au lieu de 10 % ou 20 %",
+    description: "TVA réduite applicable sur les travaux d'adaptation pour personnes âgées ou handicapées. Appliquée directement par l'artisan.",
+    condition: "Logement de plus de 2 ans — mention obligatoire sur le devis",
+  });
+
+  // 6. CARSAT / Caisse de retraite
+  if (isRetraite) {
+    aides.push({
+      id: "carsat", nom: "Aide CARSAT / Caisse de retraite", organisme: "CARSAT · MSA · CNAV",
+      eligible: true, niveau: "moyen", montantMax: 3500,
+      montantLabel: "jusqu'à 3 500 €",
+      taux: "Selon ressources et caisse de retraite",
+      description: "Les caisses de retraite proposent des aides complémentaires pour l'adaptation du logement de leurs adhérents (surtout GIR 5-6).",
+      condition: "Retraité(e) du régime général, agricole ou autre caisse",
+    });
+  }
+
+  // 7. Action Logement
+  if (isSalarie || isRetraite) {
+    aides.push({
+      id: "action_logement", nom: "Prêt Action Logement — 0 %", organisme: "Action Logement",
+      eligible: true, niveau: "info", montantMax: 0,
+      montantLabel: "Prêt jusqu'à 10 000 € (sans intérêts)",
+      taux: "Prêt à taux zéro",
+      description: "Prêt sans intérêts pour couvrir le reste à charge des travaux non subventionnés. Complément idéal aux aides directes.",
+      condition: "Salarié(e) ou retraité(e) d'une entreprise du secteur privé",
+    });
+  }
+
+  // 8. Aides locales & territoriales (détail par département)
+  const localInfo = getLocalAideInfo(data.departement || "");
+  aides.push({
+    id: "aides_locales", nom: "Aides locales & territoriales",
+    organisme: localInfo.organisms,
+    eligible: true, niveau: "info", montantMax: 0,
+    montantLabel: localInfo.montantLocal,
+    taux: "Complémentaires aux aides nationales",
+    description: localInfo.description,
+    condition: `Contact : ${localInfo.contact}`,
+  });
+
+  // Total des subventions directes (fort + moyen, hors prêts et TVA)
+  const totalSubventions = aides
+    .filter(a => a.eligible && (a.niveau === "fort" || a.niveau === "moyen"))
+    .reduce((s, a) => s + a.montantMax, 0);
+
+  return { aides, totalSubventions };
+}
 
 // ── STYLES ──────────────────────────────────────────────────
-const styles = {
+
+const S = {
   wrapper: {
     fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
     background: "#F8F6F4",
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "center",
+    display: "flex", alignItems: "flex-start", justifyContent: "center",
     padding: "24px 16px",
   },
   container: {
-    width: "100%",
-    maxWidth: 560,
+    width: "100%", maxWidth: 560,
     background: "#FFFFFF",
     borderRadius: 20,
     border: "1px solid #E8E2DD",
     boxShadow: "0 2px 12px rgba(24,38,63,0.04)",
-    overflow: "hidden",
-    position: "relative",
+    overflow: "hidden", position: "relative",
   },
   header: {
-    background: "#FFFFFF",
-    padding: "24px 32px 18px",
-    color: "#18263F",
-    textAlign: "center",
-    borderBottom: "1px solid #E8E2DD",
-  },
-  logo: {
-    fontSize: 22,
-    fontWeight: 700,
-    letterSpacing: "-0.02em",
-    marginBottom: 4,
-  },
-  headerSub: {
-    fontSize: 13,
-    opacity: 0.75,
-    fontWeight: 400,
-    letterSpacing: "0.02em",
+    background: "transparent", padding: "24px 32px 18px",
+    color: "#18263F", textAlign: "center",
   },
   progressBar: {
-    display: "flex",
-    alignItems: "center",
-    padding: "16px 32px 4px",
-    background: "#FFFFFF",
+    display: "flex", alignItems: "center",
+    padding: "14px 22px 4px", background: "#FFFFFF",
   },
   progressDot: (active, done) => ({
-    width: 10,
-    height: 10,
-    borderRadius: "50%",
+    width: 8, height: 8, borderRadius: "50%",
     background: done ? "#8F1349" : active ? "#8F1349" : "#E8E2DD",
-    transition: "all 0.3s ease",
-    flexShrink: 0,
+    transition: "all 0.3s ease", flexShrink: 0,
     border: active ? "2px solid #8F1349" : "none",
-    boxShadow: active ? "0 0 0 4px rgba(143,19,73,0.12)" : "none",
+    boxShadow: active ? "0 0 0 3px rgba(143,19,73,0.12)" : "none",
   }),
   progressLine: (done) => ({
-    flex: 1,
-    height: 2,
+    flex: 1, height: 2,
     background: done ? "#8F1349" : "#E8E2DD",
-    transition: "background 0.3s ease",
-    margin: "0 4px",
+    transition: "background 0.3s ease", margin: "0 2px",
   }),
   progressLabels: {
-    display: "flex",
-    justifyContent: "space-between",
-    padding: "8px 24px 16px",
-    background: "#FFFFFF",
+    display: "flex", justifyContent: "space-between",
+    padding: "5px 16px 12px", background: "#FFFFFF",
   },
   progressLabel: (active) => ({
     fontSize: 10,
@@ -234,221 +456,91 @@ const styles = {
     transition: "all 0.3s ease",
   }),
   body: {
-    padding: "28px 28px 24px",
-    minHeight: 340,
-    display: "flex",
-    flexDirection: "column",
+    padding: "28px 28px 24px", minHeight: 340,
+    display: "flex", flexDirection: "column",
   },
   question: {
-    fontSize: 26,
-    fontWeight: 400,
-    color: "#18263F",
-    textAlign: "center",
-    lineHeight: 1.25,
-    marginBottom: 10,
+    fontSize: 26, fontWeight: 400, color: "#18263F",
+    textAlign: "center", lineHeight: 1.25, marginBottom: 10,
     fontFamily: "'DM Serif Display', 'Georgia', serif",
   },
   hint: {
-    fontSize: 14,
-    color: "#6B7280",
-    textAlign: "center",
-    marginBottom: 24,
-    lineHeight: 1.5,
+    fontSize: 14, color: "#6B7280",
+    textAlign: "center", marginBottom: 24, lineHeight: 1.5,
   },
   optionsGrid: (cols = 1) => ({
     display: "grid",
     gridTemplateColumns: cols > 1 ? `repeat(${cols}, 1fr)` : "1fr",
-    gap: 10,
-    marginTop: 8,
+    gap: 10, marginTop: 8,
   }),
   optionBtn: (selected) => ({
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
+    display: "flex", alignItems: "flex-start", gap: 12,
     padding: "14px 18px",
     border: `1.5px solid ${selected ? "#8F1349" : "#E8E2DD"}`,
     borderRadius: 10,
-    background: selected ? "#8F134915" : "#FFFFFF",
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    fontSize: 15,
-    fontWeight: selected ? 600 : 400,
-    color: "#18263F",
-    textAlign: "left",
-    outline: "none",
+    background: selected ? "rgba(143,19,73,0.06)" : "#FFFFFF",
+    cursor: "pointer", transition: "all 0.2s ease",
+    fontSize: 15, fontWeight: selected ? 600 : 400,
+    color: "#18263F", textAlign: "left", outline: "none",
   }),
   radio: (selected) => ({
-    width: 20,
-    height: 20,
-    borderRadius: "50%",
+    width: 18, height: 18, borderRadius: "50%",
     border: `1.5px solid ${selected ? "#8F1349" : "#E8E2DD"}`,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    transition: "all 0.2s ease",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    flexShrink: 0, marginTop: 1, transition: "all 0.2s ease",
   }),
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: "50%",
-    background: "#8F1349",
-  },
+  radioDot: { width: 9, height: 9, borderRadius: "50%", background: "#8F1349" },
   input: {
-    width: "100%",
-    padding: "14px 18px",
-    border: "1.5px solid #E8E2DD",
-    borderRadius: 10,
-    fontSize: 14,
-    color: "#18263F",
-    outline: "none",
-    transition: "border-color 0.2s ease",
-    fontFamily: "inherit",
+    width: "100%", padding: "13px 16px",
+    border: "1.5px solid #E8E2DD", borderRadius: 10,
+    fontSize: 14, color: "#18263F", outline: "none",
+    transition: "border-color 0.2s ease", fontFamily: "inherit",
     boxSizing: "border-box",
-  },
-  navRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: "auto",
-    paddingTop: 24,
-    gap: 12,
-  },
-  backBtn: {
-    padding: "12px 20px",
-    border: "1.5px solid #E8E2DD",
-    borderRadius: 10,
-    background: "#FFFFFF",
-    color: "#18263F",
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    fontFamily: "inherit",
-  },
-  nextBtn: (disabled) => ({
-    padding: "12px 28px",
-    border: "none",
-    borderRadius: 10,
-    background: disabled ? "#E8E2DD" : "#8F1349",
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: disabled ? "not-allowed" : "pointer",
-    transition: "all 0.2s ease",
-    fontFamily: "inherit",
-    marginLeft: "auto",
-    boxShadow: disabled ? "none" : "0 2px 6px rgba(143,19,73,0.15)",
-  }),
-  ctaBtn: (color = "#0F766E") => ({
-    padding: "16px 32px",
-    border: "none",
-    borderRadius: 12,
-    background: color,
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    fontFamily: "inherit",
-    width: "100%",
-    boxShadow: `0 2px 8px ${color}30`,
-    letterSpacing: "0.01em",
-  }),
-  fieldGroup: {
-    marginBottom: 16,
-  },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#18263F",
-    marginBottom: 6,
-    display: "block",
-  },
-  required: {
-    color: "#DC2626",
-    marginLeft: 2,
-  },
-  error: {
-    fontSize: 12,
-    color: "#DC2626",
-    marginTop: 4,
   },
   select: {
-    width: "100%",
-    padding: "14px 18px",
-    border: "1.5px solid #E8E2DD",
-    borderRadius: 10,
-    fontSize: 14,
-    color: "#18263F",
-    background: "#F8F6F4",
-    outline: "none",
-    fontFamily: "inherit",
-    appearance: "none",
-    boxSizing: "border-box",
-    cursor: "pointer",
+    width: "100%", padding: "13px 16px",
+    border: "1.5px solid #E8E2DD", borderRadius: 10,
+    fontSize: 14, color: "#18263F", background: "#F8F6F4",
+    outline: "none", fontFamily: "inherit",
+    appearance: "none", boxSizing: "border-box", cursor: "pointer",
   },
-  resultCard: (bg) => ({
-    background: bg,
-    borderRadius: 16,
-    padding: "24px",
-    marginBottom: 20,
-    textAlign: "center",
-  }),
-  resultPercent: (color) => ({
-    fontSize: 56,
-    fontWeight: 800,
-    color: color,
-    lineHeight: 1,
-    fontFamily: "'DM Serif Display', Georgia, serif",
-  }),
-  resultLabel: {
-    fontSize: 14,
-    color: "#18263F",
-    opacity: 0.6,
-    marginTop: 4,
+  navRow: {
+    display: "flex", justifyContent: "space-between",
+    alignItems: "center", marginTop: "auto", paddingTop: 18, gap: 12,
   },
-  checkmark: {
-    fontSize: 48,
-    marginBottom: 8,
+  backBtn: {
+    padding: "11px 18px", border: "1.5px solid #E8E2DD",
+    borderRadius: 10, background: "#FFFFFF", color: "#18263F",
+    fontSize: 14, fontWeight: 600, cursor: "pointer",
+    transition: "all 0.2s ease", fontFamily: "inherit",
+  },
+  nextBtn: (disabled) => ({
+    padding: "11px 26px", border: "none",
+    borderRadius: 10, background: disabled ? "#E8E2DD" : "#8F1349",
+    color: "#fff", fontSize: 14, fontWeight: 600,
+    cursor: disabled ? "not-allowed" : "pointer",
+    transition: "all 0.2s ease", fontFamily: "inherit", marginLeft: "auto",
+    boxShadow: disabled ? "none" : "0 2px 6px rgba(143,19,73,0.18)",
+  }),
+  fieldGroup: { marginBottom: 12 },
+  fieldLabel: { fontSize: 13, fontWeight: 600, color: "#18263F", marginBottom: 5, display: "block" },
+  required: { color: "#DC2626", marginLeft: 2 },
+  error: { fontSize: 12, color: "#DC2626", marginTop: 3 },
+  badge: {
+    display: "inline-flex", alignItems: "center", gap: 4,
+    background: "rgba(143,19,73,0.08)", borderRadius: 20, padding: "5px 12px",
+    fontSize: 11, color: "#8F1349", marginTop: 8, fontWeight: 600, letterSpacing: 0.2,
   },
   footer: {
-    textAlign: "center",
-    padding: "16px 32px 20px",
-    borderTop: "1px solid #E8E2DD",
-    background: "#F8F6F4",
+    textAlign: "center", padding: "12px 28px 16px",
+    borderTop: "1px solid #E8E2DD", background: "#F8F6F4",
   },
-  footerText: {
-    fontSize: 11,
-    color: "#6B7280",
-    lineHeight: 1.5,
-  },
-  badge: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 4,
-    background: "#8F134915",
-    borderRadius: 20,
-    padding: "6px 14px",
-    fontSize: 11,
-    color: "#8F1349",
-    marginTop: 10,
-    fontWeight: 600,
-    letterSpacing: 0.2,
-  },
-  // Confirmation overlay
+  footerText: { fontSize: 11, color: "#6B7280", lineHeight: 1.5 },
   confirmOverlay: {
-    position: "absolute",
-    inset: 0,
-    background: "rgba(255,255,255,0.97)",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 40,
-    zIndex: 10,
-    borderRadius: 24,
-    textAlign: "center",
+    position: "absolute", inset: 0, background: "rgba(255,255,255,0.97)",
+    display: "flex", flexDirection: "column", alignItems: "center",
+    justifyContent: "center", padding: 40, zIndex: 10,
+    borderRadius: 20, textAlign: "center",
   },
 };
 
@@ -457,90 +549,117 @@ const styles = {
 function ProgressBar({ step }) {
   return (
     <>
-      <div style={styles.progressBar}>
+      <div style={S.progressBar}>
         {STEPS.map((s, i) => (
           <React.Fragment key={s.id}>
-            <div style={styles.progressDot(i === step, i < step)} />
-            {i < STEPS.length - 1 && <div style={styles.progressLine(i < step)} />}
+            <div style={S.progressDot(i === step, i < step)} />
+            {i < STEPS.length - 1 && <div style={S.progressLine(i < step)} />}
           </React.Fragment>
         ))}
       </div>
-      <div style={styles.progressLabels}>
+      <div style={S.progressLabels}>
         {STEPS.map((s, i) => (
-          <div key={s.id} style={styles.progressLabel(i === step || i < step)}>
-            {s.label}
-          </div>
+          <div key={s.id} style={S.progressLabel(i === step || i < step)}>{s.label}</div>
         ))}
       </div>
     </>
   );
 }
 
-function OptionButton({ label, emoji, selected, onClick, style: extraStyle }) {
+function OptionButton({ label, hint, selected, onClick, center }) {
   return (
     <button
       onClick={onClick}
-      style={{ ...styles.optionBtn(selected), ...extraStyle }}
-      onMouseEnter={(e) => {
-        if (!selected) e.target.style.borderColor = "#6B7280";
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) e.target.style.borderColor = "#E8E2DD";
-      }}
+      style={{ ...S.optionBtn(selected), ...(center ? { justifyContent: "center" } : {}) }}
+      onMouseEnter={e => { if (!selected) e.currentTarget.style.borderColor = "#6B7280"; }}
+      onMouseLeave={e => { if (!selected) e.currentTarget.style.borderColor = "#E8E2DD"; }}
     >
-      <div style={styles.radio(selected)}>
-        {selected && <div style={styles.radioDot} />}
+      <div style={S.radio(selected)}>
+        {selected && <div style={S.radioDot} />}
       </div>
-      {emoji && <span style={{ fontSize: 20 }}>{emoji}</span>}
-      <span>{label}</span>
+      <div>
+        <div>{label}</div>
+        {hint && <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 400, marginTop: 2 }}>{hint}</div>}
+      </div>
     </button>
   );
 }
 
 function NavButtons({ onBack, onNext, canGoNext, showBack, nextLabel = "Continuer" }) {
   return (
-    <div style={styles.navRow}>
-      {showBack ? (
-        <button style={styles.backBtn} onClick={onBack}>
-          ← Retour
-        </button>
-      ) : (
-        <div />
-      )}
-      <button
-        style={styles.nextBtn(!canGoNext)}
-        onClick={onNext}
-        disabled={!canGoNext}
-      >
+    <div style={S.navRow}>
+      {showBack ? <button style={S.backBtn} onClick={onBack}>← Retour</button> : <div />}
+      <button style={S.nextBtn(!canGoNext)} onClick={onNext} disabled={!canGoNext}>
         {nextLabel} →
       </button>
     </div>
   );
 }
 
-// ── STEP COMPONENTS ─────────────────────────────────────────
+// ── STEPS ───────────────────────────────────────────────────
 
 function StepAge({ data, onChange }) {
   return (
     <>
-      <h2 style={styles.question}>
-        Quelle est la tranche d'âge de la personne concernée ?
-      </h2>
-      <p style={styles.hint}>
-        La personne qui souhaite adapter son logement.
-      </p>
-      <div style={styles.optionsGrid(2)}>
-        <OptionButton
-          label="Moins de 60 ans"
-          selected={data.age === "less_60"}
-          onClick={() => onChange("age", "less_60")}
-        />
-        <OptionButton
-          label="60 ans ou plus"
-          selected={data.age === "60_plus"}
-          onClick={() => onChange("age", "60_plus")}
-        />
+      <h2 style={S.question}>Quelle est la tranche d'âge de la personne concernée ?</h2>
+      <p style={S.hint}>La personne qui souhaite adapter son logement.</p>
+      <div style={S.optionsGrid(2)}>
+        <OptionButton label="Moins de 60 ans" selected={data.age === "less_60"} onClick={() => onChange("age", "less_60")} />
+        <OptionButton label="60 ans ou plus"  selected={data.age === "60_plus"}  onClick={() => onChange("age", "60_plus")} />
       </div>
+    </>
+  );
+}
+
+const SITUATION_PRECISIONS = [
+  { key: "ergo_rapport", label: "Dispose-t-elle d'un rapport d'ergothérapeute de moins de 6 mois et pouvez-vous le transmettre ?" },
+  { key: "chute_hospi",  label: "Au cours des 6 derniers mois, a-t-elle fait une chute ayant entraîné une hospitalisation et une perte d'autonomie ?" },
+  { key: "aidant",       label: "Est-elle aidée au quotidien par un proche ou un professionnel ?" },
+];
+
+function StepSituation({ data, onChange }) {
+  return (
+    <>
+      <h2 style={S.question}>Quelle est la situation de la personne ?</h2>
+      <p style={S.hint}>Cela détermine les aides auxquelles vous pouvez prétendre.</p>
+      <div style={S.optionsGrid(1)}>
+        {SITUATION_OPTIONS.map(opt => (
+          <OptionButton key={opt.value} label={opt.label} hint={opt.hint}
+            selected={data.situation === opt.value} onClick={() => onChange("situation", opt.value)} />
+        ))}
+      </div>
+
+      {/* Questions facultatives — masquées si "prévention/anticipation" */}
+      {data.situation && data.situation !== "prevention" && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #E8E2DD" }}>
+          {SITUATION_PRECISIONS.map((q, i) => (
+            <div key={q.key} style={{ marginBottom: i < SITUATION_PRECISIONS.length - 1 ? 14 : 0 }}>
+              <div style={{ fontSize: 12, color: "#18263F", fontWeight: 500, lineHeight: 1.55, marginBottom: 7 }}>
+                {q.label}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["oui", "non"].map(v => {
+                  const selected = data[q.key] === v;
+                  return (
+                    <button key={v}
+                      onClick={() => onChange(q.key, selected ? undefined : v)}
+                      style={{
+                        padding: "7px 20px", borderRadius: 8, cursor: "pointer",
+                        border: `1.5px solid ${selected ? "#8F1349" : "#E8E2DD"}`,
+                        background: selected ? "rgba(143,19,73,0.06)" : "#fff",
+                        color: selected ? "#8F1349" : "#6B7280",
+                        fontWeight: selected ? 700 : 400, fontSize: 13,
+                        transition: "all 0.15s ease",
+                      }}>
+                      {v === "oui" ? "Oui" : "Non"}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -548,20 +667,12 @@ function StepAge({ data, onChange }) {
 function StepStatut({ data, onChange }) {
   return (
     <>
-      <h2 style={styles.question}>
-        Concernant son logement, cette personne est :
-      </h2>
-      <p style={styles.hint}>
-        Le statut d'occupation détermine l'éligibilité aux aides.
-      </p>
-      <div style={styles.optionsGrid(1)}>
-        {HOUSING_OPTIONS.map((opt) => (
-          <OptionButton
-            key={opt.value}
-            label={opt.label}
-            selected={data.statut === opt.value}
-            onClick={() => onChange("statut", opt.value)}
-          />
+      <h2 style={S.question}>Concernant son logement, cette personne est :</h2>
+      <p style={S.hint}>Le statut d'occupation détermine l'éligibilité à certaines aides.</p>
+      <div style={S.optionsGrid(1)}>
+        {HOUSING_OPTIONS.map(opt => (
+          <OptionButton key={opt.value} label={opt.label}
+            selected={data.statut === opt.value} onClick={() => onChange("statut", opt.value)} />
         ))}
       </div>
     </>
@@ -572,33 +683,21 @@ function StepDepartement({ data, onChange }) {
   const isValid = data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
   return (
     <>
-      <h2 style={styles.question}>
-        Quel est le numéro de département du logement ?
-      </h2>
-      <p style={styles.hint}>
-        Le département du logement concerné par les travaux d'adaptation.
-      </p>
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={3}
-        placeholder="Ex : 75, 92, 93..."
+      <h2 style={S.question}>Quel est le département du logement ?</h2>
+      <p style={S.hint}>Certaines aides locales varient selon le département.</p>
+      <input type="text" inputMode="numeric" maxLength={3}
+        placeholder="Ex : 75, 92, 13…"
         value={data.departement || ""}
-        onChange={(e) => onChange("departement", e.target.value.trim())}
+        onChange={e => onChange("departement", e.target.value.trim())}
         style={{
-          ...styles.input,
+          ...S.input,
           borderColor: data.departement && !isValid ? "#DC2626" : "#E8E2DD",
-          textAlign: "center",
-          fontSize: 24,
-          fontWeight: 700,
-          letterSpacing: 4,
+          textAlign: "center", fontSize: 24, fontWeight: 700, letterSpacing: 4,
         }}
-        onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
-        onBlur={(e) => (e.target.style.borderColor = data.departement && !isValid ? "#DC2626" : "#E8E2DD")}
+        onFocus={e => (e.target.style.borderColor = "#8F1349")}
+        onBlur={e => (e.target.style.borderColor = data.departement && !isValid ? "#DC2626" : "#E8E2DD")}
       />
-      {data.departement && !isValid && (
-        <p style={styles.error}>Veuillez saisir un numéro de département valide.</p>
-      )}
+      {data.departement && !isValid && <p style={S.error}>Veuillez saisir un numéro de département valide.</p>}
     </>
   );
 }
@@ -606,21 +705,11 @@ function StepDepartement({ data, onChange }) {
 function StepOccupants({ data, onChange }) {
   return (
     <>
-      <h2 style={styles.question}>
-        Combien de personnes habitent dans ce logement ?
-      </h2>
-      <p style={styles.hint}>
-        Le nombre d'occupants, y compris la personne concernée.
-      </p>
-      <div style={styles.optionsGrid(3)}>
-        {OCCUPANTS_OPTIONS.map((n) => (
-          <OptionButton
-            key={n}
-            label={n}
-            selected={data.occupants === n}
-            onClick={() => onChange("occupants", n)}
-            style={{ justifyContent: "center", padding: "16px 12px" }}
-          />
+      <h2 style={S.question}>Combien de personnes habitent dans ce logement ?</h2>
+      <p style={S.hint}>Y compris la personne concernée.</p>
+      <div style={S.optionsGrid(3)}>
+        {OCCUPANTS_OPTIONS.map(n => (
+          <OptionButton key={n} label={n} center selected={data.occupants === n} onClick={() => onChange("occupants", n)} />
         ))}
       </div>
     </>
@@ -628,22 +717,34 @@ function StepOccupants({ data, onChange }) {
 }
 
 function StepRevenus({ data, onChange }) {
+  const opts = getIncomeOptions(data.occupants, data.departement);
+  const isIDF = IDF_DEPTS.includes(String(data.departement));
   return (
     <>
-      <h2 style={styles.question}>
-        Quel est le revenu fiscal de référence du foyer ?
-      </h2>
-      <p style={styles.hint}>
-        Revenu cumulé de toutes les personnes présentes dans le logement (avis d'imposition N-1).
+      <h2 style={S.question}>Quel est le revenu fiscal de référence du foyer ?</h2>
+      <p style={S.hint}>
+        Revenus cumulés de toutes les personnes dans le logement (avis d'imposition N-1).
+        {data.occupants && <span style={{ color: "#8F1349", fontWeight: 600 }}> Foyer de {data.occupants} personne{data.occupants === "1" ? "" : "s"}{isIDF ? " — barème IDF" : ""}.</span>}
       </p>
-      <div style={styles.optionsGrid(1)}>
-        {INCOME_OPTIONS.map((opt) => (
-          <OptionButton
-            key={opt.value}
-            label={opt.label}
-            selected={data.revenus === opt.value}
-            onClick={() => onChange("revenus", opt.value)}
-          />
+      <div style={S.optionsGrid(1)}>
+        {opts.map(opt => (
+          <OptionButton key={opt.value} label={opt.label}
+            selected={data.revenus === opt.value} onClick={() => onChange("revenus", opt.value)} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function StepProfil({ data, onChange }) {
+  return (
+    <>
+      <h2 style={S.question}>Quelle est la situation professionnelle de la personne ?</h2>
+      <p style={S.hint}>Certaines aides (CARSAT, Action Logement) dépendent du statut professionnel.</p>
+      <div style={S.optionsGrid(2)}>
+        {PROFIL_OPTIONS.map(opt => (
+          <OptionButton key={opt.value} label={opt.label}
+            selected={data.profil === opt.value} onClick={() => onChange("profil", opt.value)} />
         ))}
       </div>
     </>
@@ -651,321 +752,538 @@ function StepRevenus({ data, onChange }) {
 }
 
 function StepContact({ data, onChange, errors }) {
-  const eligibility = getEligibility(data);
-  const teaser =
-    eligibility.percent > 0
-      ? `Vos résultats sont prêts ! Découvrez le montant de vos aides.`
-      : `Votre estimation est prête. Découvrez les options disponibles.`;
-
   return (
     <>
-      <h2 style={styles.question}>Vos résultats sont prêts</h2>
-      <p style={styles.hint}>{teaser}<br />Renseignez vos coordonnées pour recevoir votre synthèse personnalisée.</p>
-
-      <div style={styles.fieldGroup}>
-        <label style={styles.fieldLabel}>
-          Prénom et Nom <span style={styles.required}>*</span>
+      <h2 style={S.question}>Vos résultats sont prêts</h2>
+      <p style={S.hint}>Renseignez vos coordonnées pour recevoir votre bilan d'aides personnalisé par email.</p>
+      <div style={S.fieldGroup}>
+        <label style={S.fieldLabel}>Prénom et Nom <span style={S.required}>*</span></label>
+        <input type="text" placeholder="Caroline Dupont" value={data.nom || ""}
+          onChange={e => onChange("nom", e.target.value)}
+          style={{ ...S.input, borderColor: errors?.nom ? "#DC2626" : "#E8E2DD" }}
+          onFocus={e => (e.target.style.borderColor = "#8F1349")}
+          onBlur={e => (e.target.style.borderColor = errors?.nom ? "#DC2626" : "#E8E2DD")} />
+        {errors?.nom && <p style={S.error}>{errors.nom}</p>}
+      </div>
+      <div style={S.fieldGroup}>
+        <label style={S.fieldLabel}>Téléphone <span style={S.required}>*</span></label>
+        <input type="tel" placeholder="06 00 00 00 00" value={data.telephone || ""}
+          onChange={e => onChange("telephone", e.target.value)}
+          style={{ ...S.input, borderColor: errors?.telephone ? "#DC2626" : "#E8E2DD" }}
+          onFocus={e => (e.target.style.borderColor = "#8F1349")}
+          onBlur={e => (e.target.style.borderColor = errors?.telephone ? "#DC2626" : "#E8E2DD")} />
+        {errors?.telephone && <p style={S.error}>{errors.telephone}</p>}
+      </div>
+      <div style={S.fieldGroup}>
+        <label style={S.fieldLabel}>Adresse email <span style={S.required}>*</span></label>
+        <input type="email" placeholder="exemple@email.fr" value={data.email || ""}
+          onChange={e => onChange("email", e.target.value)}
+          style={{ ...S.input, borderColor: errors?.email ? "#DC2626" : "#E8E2DD" }}
+          onFocus={e => (e.target.style.borderColor = "#8F1349")}
+          onBlur={e => (e.target.style.borderColor = errors?.email ? "#DC2626" : "#E8E2DD")} />
+        {errors?.email && <p style={S.error}>{errors.email}</p>}
+      </div>
+      {/* Case partenaire */}
+      <div style={{ ...S.fieldGroup, marginTop: 4 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
+          <input type="checkbox" checked={data.isPartenaire || false}
+            onChange={e => onChange("isPartenaire", e.target.checked)}
+            style={{ width: 16, height: 16, accentColor: "#8F1349", cursor: "pointer", flexShrink: 0 }} />
+          <span style={{ fontSize: 13, color: "#18263F", fontWeight: 500 }}>
+            Je recommande un bénéficiaire <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 400 }}>(partenaire Vivalea)</span>
+          </span>
         </label>
-        <input
-          type="text"
-          placeholder="Caroline Dupont"
-          value={data.nom || ""}
-          onChange={(e) => onChange("nom", e.target.value)}
-          style={{
-            ...styles.input,
-            borderColor: errors?.nom ? "#DC2626" : "#E8E2DD",
-          }}
-          onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
-          onBlur={(e) => (e.target.style.borderColor = errors?.nom ? "#DC2626" : "#E8E2DD")}
-        />
-        {errors?.nom && <p style={styles.error}>{errors.nom}</p>}
       </div>
 
-      <div style={styles.fieldGroup}>
-        <label style={styles.fieldLabel}>
-          Téléphone <span style={styles.required}>*</span>
-        </label>
-        <input
-          type="tel"
-          placeholder="06 00 00 00 00"
-          value={data.telephone || ""}
-          onChange={(e) => onChange("telephone", e.target.value)}
-          style={{
-            ...styles.input,
-            borderColor: errors?.telephone ? "#DC2626" : "#E8E2DD",
-          }}
-          onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
-          onBlur={(e) => (e.target.style.borderColor = errors?.telephone ? "#DC2626" : "#E8E2DD")}
-        />
-        {errors?.telephone && <p style={styles.error}>{errors.telephone}</p>}
-      </div>
+      {data.isPartenaire && (
+        <div style={{
+          background: "#FFF1F4", border: "1px solid #F9A8C0", borderRadius: 10,
+          padding: "14px 14px 6px", marginBottom: 8,
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#8F1349", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
+            Informations partenaire
+          </div>
+          <div style={S.fieldGroup}>
+            <label style={S.fieldLabel}>Nom de votre entreprise <span style={S.required}>*</span></label>
+            <input type="text" placeholder="Cabinet Dupont, CCAS de Lyon…" value={data.partenaireEntreprise || ""}
+              onChange={e => onChange("partenaireEntreprise", e.target.value)}
+              style={{ ...S.input, borderColor: errors?.partenaireEntreprise ? "#DC2626" : "#E8E2DD" }}
+              onFocus={e => (e.target.style.borderColor = "#8F1349")}
+              onBlur={e => (e.target.style.borderColor = errors?.partenaireEntreprise ? "#DC2626" : "#E8E2DD")} />
+            {errors?.partenaireEntreprise && <p style={S.error}>{errors.partenaireEntreprise}</p>}
+          </div>
+          <div style={S.fieldGroup}>
+            <label style={S.fieldLabel}>Votre nom <span style={S.required}>*</span></label>
+            <input type="text" placeholder="Marie Martin" value={data.partenaireNom || ""}
+              onChange={e => onChange("partenaireNom", e.target.value)}
+              style={{ ...S.input, borderColor: errors?.partenaireNom ? "#DC2626" : "#E8E2DD" }}
+              onFocus={e => (e.target.style.borderColor = "#8F1349")}
+              onBlur={e => (e.target.style.borderColor = errors?.partenaireNom ? "#DC2626" : "#E8E2DD")} />
+            {errors?.partenaireNom && <p style={S.error}>{errors.partenaireNom}</p>}
+          </div>
+        </div>
+      )}
 
-      <div style={styles.fieldGroup}>
-        <label style={styles.fieldLabel}>
-          Adresse email <span style={styles.required}>*</span>
-        </label>
-        <input
-          type="email"
-          placeholder="exemple@email.fr"
-          value={data.email || ""}
-          onChange={(e) => onChange("email", e.target.value)}
-          style={{
-            ...styles.input,
-            borderColor: errors?.email ? "#DC2626" : "#E8E2DD",
-          }}
-          onFocus={(e) => (e.target.style.borderColor = "#8F1349")}
-          onBlur={(e) => (e.target.style.borderColor = errors?.email ? "#DC2626" : "#E8E2DD")}
-        />
-        {errors?.email && <p style={styles.error}>{errors.email}</p>}
-      </div>
-
-      <div style={styles.fieldGroup}>
-        <label style={styles.fieldLabel}>Comment avez-vous connu Vivalea ? <span style={styles.required}>*</span></label>
-        <select
-          value={data.source || ""}
-          onChange={(e) => onChange("source", e.target.value)}
-          style={{
-            ...styles.select,
-            borderColor: errors?.source ? "#DC2626" : "#E8E2DD",
-          }}
-        >
-          <option value="">— Sélectionnez —</option>
-          {SOURCE_OPTIONS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        {errors?.source && <p style={styles.error}>{errors.source}</p>}
-      </div>
+      {/* "Comment avez-vous connu Vivalea ?" — masqué si partenaire */}
+      {!data.isPartenaire && (
+        <div style={S.fieldGroup}>
+          <label style={S.fieldLabel}>Comment avez-vous connu Vivalea ? <span style={S.required}>*</span></label>
+          <select value={data.source || ""} onChange={e => onChange("source", e.target.value)}
+            style={{ ...S.select, borderColor: errors?.source ? "#DC2626" : "#E8E2DD" }}>
+            <option value="">— Sélectionnez —</option>
+            {SOURCE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          {errors?.source && <p style={S.error}>{errors.source}</p>}
+        </div>
+      )}
     </>
   );
 }
 
+// ── RÉSULTATS ────────────────────────────────────────────────
+
+// Carte hero MaPrimeAdapt' (pleine largeur, mise en avant)
+function MaPrimeAdaptHero({ aide, allAides }) {
+  const cfg = NIVEAU_CONFIG[aide.niveau] || NIVEAU_CONFIG.non;
+  const isEligible = aide.niveau === "fort" || aide.niveau === "moyen";
+  const taux = aide.niveau === "fort" ? "70 %" : aide.niveau === "moyen" ? "50 %" : null;
+
+  // Montage alternatif : top 3 aides par montant décroissant quand non éligible
+  const topAlternatives = !isEligible
+    ? (allAides || [])
+        .filter(a => a.id !== "maprimeadapt" && a.eligible && (a.niveau === "fort" || a.niveau === "moyen"))
+        .sort((a, b) => b.montantMax - a.montantMax)
+        .slice(0, 3)
+    : [];
+  const totalAlternatif = topAlternatives.reduce((s, a) => s + a.montantMax, 0);
+
+  return (
+    <div style={{
+      border: `2px solid ${isEligible ? cfg.color : "#E8E2DD"}`,
+      borderRadius: 14, padding: "18px 20px", marginBottom: 14,
+      background: isEligible ? cfg.bg : "#F9FAFB",
+    }}>
+      {/* Badge + label */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
+          background: cfg.color, color: "#fff", padding: "3px 8px", borderRadius: 4,
+        }}>{cfg.label}</span>
+        <span style={{ fontSize: 10, color: "#6B7280", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          Aide principale · MaPrimeAdapt'
+        </span>
+      </div>
+
+      {/* Corps */}
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, color: "#18263F", lineHeight: 1.2, marginBottom: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+          MaPrimeAdapt'
+          <TooltipInfo aideId="maprimeadapt" />
+        </div>
+        <div style={{ fontSize: 11, color: "#8F1349", fontWeight: 700, marginBottom: 8 }}>ANAH / État</div>
+        <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5, textAlign: "left", marginBottom: isEligible ? 12 : 4 }}>
+          {aide.description}
+        </div>
+        {!isEligible && (
+          <div style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic", textAlign: "left" }}>{aide.condition}</div>
+        )}
+      </div>
+
+      {isEligible && (
+        <div style={{ textAlign: "center", marginTop: 4 }}>
+          <div style={{
+            width: 88, height: 88, borderRadius: "50%",
+            background: cfg.color, display: "inline-flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            boxShadow: `0 6px 18px ${cfg.color}50`,
+          }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: "'DM Serif Display', serif" }}>{taux}</div>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.85)", letterSpacing: "0.05em" }}>prise en charge</div>
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: cfg.color, marginTop: 8 }}>
+            {aide.montantLabel}
+          </div>
+          {aide.taux && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{aide.taux}</div>}
+        </div>
+      )}
+
+      {/* Montage alternatif (non-éligibles seulement) */}
+      {!isEligible && topAlternatives.length > 0 && (
+        <div style={{
+          marginTop: 14, background: "#F0FDF4",
+          border: "1.5px solid #86EFAC", borderRadius: 10, padding: "12px 14px",
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
+            Montage alternatif recommandé
+          </div>
+          <div style={{ fontSize: 12, color: "#18263F", marginBottom: 10, lineHeight: 1.5 }}>
+            Sans MaPrimeAdapt', vous pouvez combiner ces aides{totalAlternatif > 0 ? ` pour un potentiel de jusqu'à ${totalAlternatif.toLocaleString("fr-FR")} €` : ""} :
+          </div>
+          {topAlternatives.map((a, i) => {
+            const c = NIVEAU_CONFIG[a.niveau];
+            return (
+              <div key={a.id} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                paddingTop: i > 0 ? 7 : 0, marginTop: i > 0 ? 7 : 0,
+                borderTop: i > 0 ? "1px solid #D1FAE5" : "none",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ fontSize: 12, color: "#059669" }}>✓</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#18263F" }}>{a.nom}</span>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: c.color, whiteSpace: "nowrap" }}>{a.montantLabel}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── MENTIONS LÉGALES PAR AIDE ────────────────────────────────
+const MENTIONS_LEGALES = {
+  maprimeadapt:    "Montant indicatif. Le calcul définitif est réalisé par l'ANAH sur la base de vos devis de travaux et de votre situation fiscale.",
+  apa:             "Montant indicatif. Le calcul définitif est réalisé par votre Conseil Départemental après évaluation de votre niveau d'autonomie (GIR).",
+  pch:             "Montant indicatif. L'attribution est décidée par la MDPH après instruction de votre dossier et évaluation de vos besoins de compensation.",
+  credit_impot:    "Montant indicatif. Le calcul définitif dépend de votre situation fiscale et est réalisé par la DGFiP lors de votre déclaration d'impôts.",
+  tva:             "Applicable directement par l'artisan sur le devis. Sous réserve d'éligibilité des travaux et de la conformité du logement (+ de 2 ans).",
+  carsat:          "Montant indicatif. Variable selon votre caisse de retraite, vos ressources et les critères d'attribution en vigueur.",
+  action_logement: "Prêt à taux zéro sous conditions d'éligibilité. Accordé par Action Logement sous réserve d'étude de dossier et d'accord de l'employeur.",
+  aides_locales:   "Montants et conditions variables selon votre commune et département. À vérifier directement auprès des organismes locaux mentionnés.",
+};
+
+// ── COMPOSANT TOOLTIP ⓘ ──────────────────────────────────────
+function TooltipInfo({ aideId, light }) {
+  const [show, setShow] = useState(false);
+  const text = MENTIONS_LEGALES[aideId];
+  if (!text) return null;
+  return (
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center", marginLeft: 4, verticalAlign: "middle" }}>
+      <button
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        onClick={e => { e.stopPropagation(); setShow(s => !s); }}
+        style={{
+          border: "none", background: "none", cursor: "pointer",
+          padding: 0, lineHeight: 1,
+          color: light ? "rgba(255,255,255,0.65)" : "#9CA3AF",
+          display: "inline-flex", alignItems: "center",
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="16" x2="12" y2="12"/>
+          <circle cx="12" cy="8" r="0.5" fill="currentColor"/>
+        </svg>
+      </button>
+      {show && (
+        <span style={{
+          position: "absolute", bottom: "calc(100% + 6px)", right: 0,
+          background: "#1F2937", color: "#F9FAFB",
+          fontSize: 11, lineHeight: 1.5, padding: "8px 11px",
+          borderRadius: 8, width: 220, zIndex: 200,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+          pointerEvents: "none", textAlign: "left",
+          whiteSpace: "normal", wordBreak: "keep-all",
+        }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Carte compacte pour la grille 2 colonnes
+function AideCardCompact({ aide }) {
+  const cfg = NIVEAU_CONFIG[aide.niveau] || NIVEAU_CONFIG.info;
+  const shortDesc = aide.description.length > 88
+    ? aide.description.substring(0, 86) + "…"
+    : aide.description;
+
+  return (
+    <div style={{
+      border: `1px solid ${cfg.color + "30"}`,
+      borderTop: `3px solid ${cfg.color}`,
+      borderRadius: 10, padding: "12px 13px",
+      background: "#FFFFFF", display: "flex", flexDirection: "column", gap: 4,
+      minHeight: 140,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{
+          fontSize: 8, fontWeight: 700, letterSpacing: "0.1em",
+          background: cfg.bg, color: cfg.color,
+          padding: "2px 6px", borderRadius: 3,
+        }}>{cfg.label}</span>
+        <TooltipInfo aideId={aide.id} />
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#18263F", lineHeight: 1.3 }}>{aide.nom}</div>
+      <div style={{ fontSize: 10, color: "#8F1349", fontWeight: 600 }}>{aide.organisme}</div>
+      <div style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.45, flexGrow: 1 }}>{shortDesc}</div>
+      <div style={{
+        marginTop: "auto", paddingTop: 6, borderTop: `1px solid ${cfg.color}20`,
+        textAlign: "center",
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: cfg.color }}>{aide.montantLabel}</div>
+        {aide.taux && <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 1 }}>{aide.taux}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Carte non-éligible compacte (liste simple)
+function AideCardNon({ aide }) {
+  const cfg = NIVEAU_CONFIG.non;
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "8px 12px", borderRadius: 8, background: "#F9FAFB",
+      border: "1px solid #E8E2DD", marginBottom: 6,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{
+          fontSize: 8, fontWeight: 700, background: cfg.bg, color: cfg.color,
+          padding: "2px 5px", borderRadius: 3, flexShrink: 0,
+        }}>NON ÉLIGIBLE</span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>{aide.nom}</span>
+        <TooltipInfo aideId={aide.id} />
+      </div>
+      <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic", textAlign: "right", maxWidth: "45%" }}>{aide.condition}</span>
+    </div>
+  );
+}
+
 function ResultScreen({ data, onReset }) {
-  const eligibility = getEligibility(data);
-  const msg = getResultMessage(eligibility, data);
+  const { aides, totalSubventions } = computeAides(data);
+
+  const mpa            = aides.find(a => a.id === "maprimeadapt");
+  const autresEligibles = aides.filter(a => a.id !== "maprimeadapt" && a.eligible && a.niveau !== "non");
+  const nonEligibles   = aides.filter(a => !a.eligible || a.niveau === "non");
+  const nbSubventions  = aides.filter(a => a.eligible && (a.niveau === "fort" || a.niveau === "moyen")).length;
+
+  // Découpe en paires pour la grille 2 colonnes
+  const paires = [];
+  for (let i = 0; i < autresEligibles.length; i += 2) {
+    paires.push(autresEligibles.slice(i, i + 2));
+  }
 
   return (
     <div style={{ animation: "fadeIn 0.5s ease" }}>
-      <div style={styles.resultCard(msg.bg)}>
-        <div style={{
-          width: 64,
-          height: 64,
-          borderRadius: "50%",
-          background: msg.eligible ? "#F8F6F4" : "#F8F6F4",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          margin: "0 auto 12px",
-          border: `3px solid ${msg.color}`,
-        }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={msg.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            {msg.eligible ? (
-              <polyline points="20 6 9 17 4 12" />
-            ) : (
-              <>
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </>
-            )}
-          </svg>
-        </div>
-        <div style={{
-          fontSize: 24,
-          fontWeight: 700,
-          color: msg.color,
-          lineHeight: 1.2,
-          fontFamily: "'DM Serif Display', Georgia, serif",
-        }}>
-          {msg.status}
-        </div>
-        <div style={styles.resultLabel}>à MaPrimeAdapt'</div>
-      </div>
 
-      {/* Récapitulatif de la simulation */}
+      {/* ── Bannière total ── */}
       <div style={{
-        background: "#fff",
-        borderRadius: 12,
-        padding: "16px 20px",
-        marginBottom: 24,
-        border: "1px solid #F8F6F4",
+        background: "linear-gradient(135deg, #8F1349 0%, #6B0D37 100%)",
+        borderRadius: 14, padding: "18px 20px", marginBottom: 14,
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
       }}>
-        <p style={{ fontSize: 13, fontWeight: 700, color: "#E9552E", marginBottom: 10, marginTop: 0 }}>
-          Récapitulatif de votre simulation
-        </p>
-        {[
-          { label: "Âge", value: data.age === "60_plus" ? "60 ans ou plus" : "Moins de 60 ans" },
-          { label: "Statut", value: HOUSING_OPTIONS.find(o => o.value === data.statut)?.label },
-          { label: "Département", value: data.departement },
-          { label: "Occupants", value: data.occupants === "6+" ? "6 ou plus" : data.occupants },
-          { label: "Revenus", value: INCOME_OPTIONS.find(o => o.value === data.revenus)?.label },
-        ].map((row, i) => (
-          <div key={i} style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "8px 0",
-            borderTop: i > 0 ? "1px solid #E8E2DD" : "none",
-          }}>
-            <span style={{ fontSize: 13, color: "#18263F", opacity: 0.6 }}>{row.label}</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#18263F", textAlign: "right", maxWidth: "60%" }}>{row.value}</span>
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ fontSize: 9, color: "rgba(255,255,255,0.7)", fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 6 }}>
+            Potentiel subventions directes estimées
           </div>
-        ))}
+          <div style={{ fontSize: 30, fontWeight: 800, color: "#FFFFFF", lineHeight: 1, fontFamily: "'DM Serif Display', Georgia, serif" }}>
+            {totalSubventions > 0 ? `jusqu'à ${totalSubventions.toLocaleString("fr-FR")} €` : "Aides disponibles"}
+          </div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", marginTop: 7, lineHeight: 1.4, padding: "0 8px" }}>
+            Estimation indicative, non contractuelle. Les montants réels dépendent de l'instruction du dossier par les organismes compétents.
+          </div>
+        </div>
+        <div style={{ textAlign: "center", flexShrink: 0 }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: "50%",
+            background: "rgba(255,255,255,0.15)", border: "2px solid rgba(255,255,255,0.4)",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{nbSubventions}</div>
+            <div style={{ fontSize: 8, color: "rgba(255,255,255,0.75)", letterSpacing: "0.04em" }}>aides</div>
+          </div>
+        </div>
       </div>
 
-      <h3 style={{ ...styles.question, fontSize: 20, marginBottom: 8 }}>{msg.headline}</h3>
-      <p style={{ fontSize: 15, color: "#18263F", lineHeight: 1.6, textAlign: "center", marginBottom: 8 }}>
-        {msg.subline}
-      </p>
-      <p style={{ fontSize: 14, color: "#18263F", lineHeight: 1.6, textAlign: "center", marginBottom: 20, opacity: 0.7 }}>
-        {msg.detail}
-      </p>
+      {/* ── Profil récap ── */}
+      <div style={{ background: "#F8F6F4", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: "#8F1349", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8, textAlign: "center" }}>
+          Votre profil
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 10px" }}>
+          {[
+            { label: "Âge",       value: data.age === "60_plus" ? "60 ans ou +" : "Moins de 60 ans" },
+            { label: "Situation", value: SITUATION_OPTIONS.find(o => o.value === data.situation)?.label },
+            { label: "Logement",  value: HOUSING_OPTIONS.find(o => o.value === data.statut)?.label },
+            { label: "Revenus",   value: getIncomeOptions(data.occupants, data.departement).find(o => o.value === data.revenus)?.label },
+            { label: "Profil",    value: PROFIL_OPTIONS.find(o => o.value === data.profil)?.label },
+            { label: "Département", value: data.departement },
+          ].filter(r => r.value).map((r, i) => (
+            <div key={i} style={{ fontSize: 11, background: "#fff", borderRadius: 6, padding: "5px 8px" }}>
+              <div style={{ fontSize: 9, color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 1 }}>{r.label}</div>
+              <div style={{ fontWeight: 600, color: "#18263F", lineHeight: 1.3 }}>{r.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
 
+      {/* ── MaPrimeAdapt' en vedette ── */}
+      {mpa && <MaPrimeAdaptHero aide={mpa} allAides={aides} />}
+
+      {/* ── Autres aides en grille 2 colonnes ── */}
+      {paires.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#18263F", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, textAlign: "center" }}>
+            Autres aides identifiées
+          </div>
+          {paires.map((paire, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              {paire.map(aide => <AideCardCompact key={aide.id} aide={aide} />)}
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* ── Non éligibles ── */}
+      {nonEligibles.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+            Non applicable dans votre situation
+          </div>
+          {nonEligibles.map(aide => <AideCardNon key={aide.id} aide={aide} />)}
+        </div>
+      )}
+
+      {/* ── CTA ── */}
       <div style={{
-        background: "#F8F6F4",
-        borderRadius: 12,
-        padding: "16px 20px",
-        marginBottom: 16,
-        borderLeft: `4px solid ${msg.color}`,
+        background: "#F8F6F4", borderRadius: 10, padding: "14px 16px",
+        marginTop: 14, borderLeft: "4px solid #8F1349",
       }}>
-        <p style={{ fontSize: 14, color: "#18263F", lineHeight: 1.6, margin: 0 }}>
-          {msg.cta}
+        <p style={{ fontSize: 13, color: "#18263F", lineHeight: 1.6, margin: 0, fontWeight: 500 }}>
+          Un conseiller Vivalea vous accompagne gratuitement pour monter votre dossier et maximiser votre financement.
         </p>
       </div>
 
-      <div style={{
-        background: "#fff",
-        borderRadius: 12,
-        padding: "14px 20px",
-        marginBottom: 24,
-        border: "1px solid #F8F6F4",
-      }}>
-        <p style={{ fontSize: 13, color: "#18263F", opacity: 0.7, margin: 0, lineHeight: 1.6 }}>
-          Un email récapitulatif avec votre estimation a été envoyé à <strong style={{ opacity: 1 }}>{data.email}</strong>.
-          <br />Un conseiller Vivalea vous recontactera dans les plus brefs délais.
-        </p>
-      </div>
-
-      <div style={{ display: "flex", gap: 12, flexDirection: "column" }}>
-        {!msg.eligible && (
-          <a
-            href="tel:+33000000000"
-            style={{
-              ...styles.ctaBtn("#8F1349"),
-              textDecoration: "none",
-              textAlign: "center",
-              display: "block",
-            }}
-          >
-            Être rappelé gratuitement
-          </a>
-        )}
-        <button
-          onClick={onReset}
-          style={{
-            ...styles.backBtn,
-            width: "100%",
-            textAlign: "center",
-          }}
-        >
-          Faire une nouvelle simulation
+      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ fontSize: 11, color: "#6B7280", textAlign: "center" }}>
+          Email récapitulatif envoyé à <strong style={{ color: "#18263F" }}>{data.email}</strong>
+        </div>
+        <button onClick={onReset} style={{ ...S.backBtn, width: "100%", textAlign: "center" }}>
+          Nouvelle simulation
         </button>
       </div>
     </div>
   );
 }
 
-// ── CONFIRMATION OVERLAY ────────────────────────────────────
+// ── OVERLAY ENVOI ────────────────────────────────────────────
 
 function ConfirmationOverlay({ visible }) {
   if (!visible) return null;
   return (
-    <div style={styles.confirmOverlay}>
-      <div style={{ marginBottom: 16 }}>
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#8F1349" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
-        </svg>
-      </div>
-      <h3 style={{ ...styles.question, fontSize: 20 }}>Envoi en cours...</h3>
-      <p style={{ color: "#18263F", opacity: 0.6, fontSize: 14 }}>Vos données sont transmises en toute sécurité.</p>
+    <div style={S.confirmOverlay}>
+      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#8F1349" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 14 }}>
+        <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
+      </svg>
+      <h3 style={{ ...S.question, fontSize: 18 }}>Calcul en cours…</h3>
+      <p style={{ color: "#6B7280", fontSize: 13 }}>Nous préparons votre bilan d'aides personnalisé.</p>
     </div>
   );
 }
 
 // ── MAIN APP ────────────────────────────────────────────────
 
-function SimulateurMaPrimeAdapt() {
-  const [step, setStep] = useState(0);
-  const [data, setData] = useState({});
-  const [errors, setErrors] = useState({});
+function SimulateurAides() {
+  const [step,      setStep]      = useState(0);
+  const [data,      setData]      = useState({});
+  const [errors,    setErrors]    = useState({});
   const [submitted, setSubmitted] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [sending,   setSending]   = useState(false);
   const bodyRef = useRef(null);
+  // Valeur du champ auto-advance au moment où l'on entre dans l'étape.
+  // L'auto-avance ne se déclenche QUE si la valeur a changé depuis l'entrée.
+  const stepEntryValue = useRef(null);
 
   const onChange = (field, value) => {
-    setData((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => ({ ...prev, [field]: undefined }));
+    setData(prev => ({ ...prev, [field]: value }));
+    setErrors(prev => ({ ...prev, [field]: undefined }));
   };
 
   const canGoNext = () => {
     switch (step) {
       case 0: return !!data.age;
-      case 1: return !!data.statut;
-      case 2: return data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
-      case 3: return !!data.occupants;
-      case 4: return !!data.revenus;
-      case 5: return !!data.nom && !!data.telephone && !!data.email && !!data.source;
+      case 1: return !!data.situation;
+      case 2: return !!data.statut;
+      case 3: return data.departement && /^(0[1-9]|[1-9][0-9]|2[AB]|97[1-6])$/i.test(data.departement);
+      case 4: return !!data.occupants;
+      case 5: return !!data.revenus;
+      case 6: return !!data.profil;
+      case 7: return !!data.nom && !!data.telephone && !!data.email && (data.isPartenaire || !!data.source);
       default: return false;
     }
   };
 
   const validateContact = () => {
     const errs = {};
-    if (!data.nom?.trim()) errs.nom = "Ce champ est obligatoire.";
-    if (!data.telephone?.trim()) errs.telephone = "Ce champ est obligatoire.";
-    else if (!/^[\d\s+()-]{10,}$/.test(data.telephone)) errs.telephone = "Numéro invalide.";
-    if (!data.email?.trim()) errs.email = "Ce champ est obligatoire.";
+    if (!data.nom?.trim())       errs.nom       = "Ce champ est obligatoire.";
+    if (!data.telephone?.trim()) {
+      errs.telephone = "Ce champ est obligatoire.";
+    } else {
+      const _t = data.telephone.trim().replace(/[\s.\-()+]/g, "");
+      // Accepte : 06/07XXXXXXXX · +336/+337XXXXXXXX · 00336/00337XXXXXXXX
+      if (!/^(?:0033|33)?0?[67]\d{8}$/.test(_t)) errs.telephone = "Merci de saisir un numéro de portable (06 ou 07).";
+    }
+    if (!data.email?.trim())     errs.email     = "Ce champ est obligatoire.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) errs.email = "Email invalide.";
-    if (!data.source) errs.source = "Ce champ est obligatoire.";
+    if (!data.isPartenaire && !data.source) errs.source = "Ce champ est obligatoire.";
+    if (data.isPartenaire) {
+      if (!data.partenaireEntreprise?.trim()) errs.partenaireEntreprise = "Ce champ est obligatoire.";
+      if (!data.partenaireNom?.trim())        errs.partenaireNom        = "Ce champ est obligatoire.";
+    }
     return errs;
   };
 
   const handleSubmit = async () => {
     const errs = validateContact();
-    if (Object.keys(errs).length > 0) {
-      setErrors(errs);
-      return;
-    }
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
 
     setSending(true);
-    const eligibility = getEligibility(data);
-    const eligLabel = eligibility.level === "very_modest" ? "Éligible (très modeste)" : eligibility.level === "modest" ? "Éligible (modeste)" : "Non éligible";
+    const { aides, totalSubventions } = computeAides(data);
+    const aidesEligibles = aides.filter(a => a.eligible && a.niveau !== "non");
+    const aidesListStr   = aidesEligibles.map(a => `${a.nom} (${a.montantLabel})`).join(" | ");
+    const mpa = aides.find(a => a.id === "maprimeadapt");
+    const mpaLabel = mpa?.niveau === "fort" ? "Éligible (très modeste)" : mpa?.niveau === "moyen" ? "Éligible (modeste)" : "Non éligible MaPrimeAdapt'";
 
     const templateParams = {
-      lead_nom: data.nom,
-      lead_telephone: data.telephone,
-      lead_email: data.email,
-      lead_source: data.source || "Non renseigné",
-      sim_age: data.age === "60_plus" ? "60 ans ou plus" : "Moins de 60 ans",
-      sim_statut: HOUSING_OPTIONS.find((o) => o.value === data.statut)?.label || data.statut,
-      sim_departement: data.departement,
-      sim_occupants: data.occupants,
-      sim_revenus: INCOME_OPTIONS.find((o) => o.value === data.revenus)?.label || data.revenus,
-      sim_eligibilite: eligLabel,
-      timestamp: new Date().toLocaleString("fr-FR"),
-      to_email: RECIPIENT_EMAIL,
+      lead_nom:          data.nom,
+      lead_telephone:    data.telephone,
+      lead_email:        data.email,
+      lead_source:       data.source || "Non renseigné",
+      sim_age:           data.age === "60_plus" ? "60 ans ou plus" : "Moins de 60 ans",
+      sim_situation:     SITUATION_OPTIONS.find(o => o.value === data.situation)?.label || data.situation,
+      sim_statut:        HOUSING_OPTIONS.find(o => o.value === data.statut)?.label || data.statut,
+      sim_departement:   data.departement,
+      sim_occupants:     data.occupants,
+      sim_revenus:       getIncomeOptions(data.occupants, data.departement).find(o => o.value === data.revenus)?.label || data.revenus,
+      sim_profil:        PROFIL_OPTIONS.find(o => o.value === data.profil)?.label || data.profil,
+      sim_aides:         aidesListStr,
+      sim_nb_aides:      String(aides.filter(a => a.eligible && (a.niveau === "fort" || a.niveau === "moyen")).length),
+      sim_montant_total: totalSubventions > 0
+        ? `jusqu'à ${totalSubventions.toLocaleString("fr-FR")} €` : "À estimer",
+      sim_eligibilite:   mpaLabel, // rétrocompatibilité
+      timestamp:         new Date().toLocaleString("fr-FR"),
+      to_email:          RECIPIENT_EMAIL,
+      partenaire:        data.isPartenaire ? "oui" : "non",
+      partenaire_entreprise: data.isPartenaire ? (data.partenaireEntreprise || "") : "",
+      partenaire_nom:    data.isPartenaire ? (data.partenaireNom || "") : "",
+      // Précisions situation (facultatif)
+      prec_ergo_rapport: data.ergo_rapport || "—",
+      prec_chute_hospi:  data.chute_hospi  || "—",
+      prec_aidant:       data.aidant        || "—",
     };
 
-    const sendEmail = (payload) =>
-      fetch("/api/send-email", {
+    try {
+      await fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(templateParams),
       });
-
-    try {
-      await sendEmail(templateParams);
     } catch (err) {
-      console.error("Send email error:", err);
+      console.error("Email error:", err);
     }
 
     setSending(false);
@@ -973,36 +1291,30 @@ function SimulateurMaPrimeAdapt() {
   };
 
   const goNext = () => {
-    if (step === 5) {
-      handleSubmit();
-      return;
-    }
-    if (canGoNext()) {
-      setStep((s) => s + 1);
-    }
+    if (step === 7) { handleSubmit(); return; }
+    if (canGoNext()) setStep(s => s + 1);
   };
+  const goBack  = () => setStep(s => Math.max(0, s - 1));
+  const reset   = () => { setStep(0); setData({}); setErrors({}); setSubmitted(false); };
 
-  const goBack = () => setStep((s) => Math.max(0, s - 1));
-
-  const reset = () => {
-    setStep(0);
-    setData({});
-    setErrors({});
-    setSubmitted(false);
-  };
-
-  // Auto-advance on selection for simple steps
+  // Enregistre la valeur du champ à l'entrée de chaque étape
+  // (doit être déclaré AVANT l'effet d'auto-avance pour garantir l'ordre d'exécution React)
   useEffect(() => {
-    if ([0, 1, 3, 4].includes(step)) {
-      const field = ["age", "statut", "", "occupants", "revenus"][step];
-      if (field && data[field]) {
-        const timer = setTimeout(() => goNext(), 400);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [data.age, data.statut, data.occupants, data.revenus]);
+    const autoFields = { 0: "age", 2: "statut", 4: "occupants", 5: "revenus", 6: "profil" };
+    const field = autoFields[step];
+    stepEntryValue.current = field ? (data[field] || null) : null;
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll to top of body on step change
+  // Auto-avance UNIQUEMENT si la sélection est nouvelle (différente de la valeur à l'entrée)
+  useEffect(() => {
+    const autoFields = { 0: "age", 2: "statut", 4: "occupants", 5: "revenus", 6: "profil" };
+    const field = autoFields[step];
+    if (field && data[field] && data[field] !== stepEntryValue.current) {
+      const t = setTimeout(() => setStep(s => s + 1), 380);
+      return () => clearTimeout(t);
+    }
+  }, [data.age, data.situation, data.statut, data.occupants, data.revenus, data.profil, step]);
+
   useEffect(() => {
     bodyRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
   }, [step]);
@@ -1010,12 +1322,14 @@ function SimulateurMaPrimeAdapt() {
   const renderStep = () => {
     if (submitted) return <ResultScreen data={data} onReset={reset} />;
     switch (step) {
-      case 0: return <StepAge data={data} onChange={onChange} />;
-      case 1: return <StepStatut data={data} onChange={onChange} />;
-      case 2: return <StepDepartement data={data} onChange={onChange} />;
-      case 3: return <StepOccupants data={data} onChange={onChange} />;
-      case 4: return <StepRevenus data={data} onChange={onChange} />;
-      case 5: return <StepContact data={data} onChange={onChange} errors={errors} />;
+      case 0: return <StepAge         data={data} onChange={onChange} />;
+      case 1: return <StepSituation   data={data} onChange={onChange} />;
+      case 2: return <StepStatut      data={data} onChange={onChange} />;
+      case 3: return <StepDepartement data={data} onChange={onChange} />;
+      case 4: return <StepOccupants   data={data} onChange={onChange} />;
+      case 5: return <StepRevenus     data={data} onChange={onChange} />;
+      case 6: return <StepProfil      data={data} onChange={onChange} />;
+      case 7: return <StepContact     data={data} onChange={onChange} errors={errors} />;
       default: return null;
     }
   };
@@ -1023,52 +1337,42 @@ function SimulateurMaPrimeAdapt() {
   return (
     <>
       <style>{`
-        
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         * { box-sizing: border-box; }
         button:hover { opacity: 0.92; }
         input:focus, select:focus { border-color: #8F1349 !important; }
       `}</style>
-      <div style={styles.wrapper}>
-        <div style={styles.container}>
+      <div style={S.wrapper}>
+        <div style={S.container}>
           <ConfirmationOverlay visible={sending} />
 
-          <div style={styles.header}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 8 }}>
+          <div style={S.header}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center" }}>
               <span style={{ fontFamily: "'DM Serif Display', serif", fontSize: 28, fontWeight: 400, color: "#8F1349", letterSpacing: "-0.01em" }}>Vivalea</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", letterSpacing: "0.15em", textTransform: "uppercase" }}>Adapt</span>
             </div>
             <div style={{ fontSize: 13, color: "#6B7280", marginTop: 6 }}>
-              Simulateur MaPrimeAdapt'
+              Simulateur d'aides — Seniors &amp; Handicap
             </div>
-            <div style={styles.badge}>
-              Gratuit · Sans engagement · Confidentiel
-            </div>
+            <div style={S.badge}>Gratuit · Sans engagement · Confidentiel</div>
           </div>
 
           {!submitted && <ProgressBar step={step} />}
 
-          <div style={styles.body} ref={bodyRef} key={step}>
+          <div style={S.body} ref={bodyRef} key={step}>
             <div style={{ animation: "fadeIn 0.35s ease" }}>
               {renderStep()}
             </div>
-
             {!submitted && (
               <NavButtons
-                showBack={step > 0}
-                onBack={goBack}
-                onNext={goNext}
+                showBack={step > 0} onBack={goBack} onNext={goNext}
                 canGoNext={canGoNext()}
-                nextLabel={step === 5 ? "Découvrir mes aides" : "Continuer"}
+                nextLabel={step === 7 ? "Découvrir mes aides" : "Continuer"}
               />
             )}
           </div>
 
-          <div style={styles.footer}>
-            <p style={styles.footerText}>
+          <div style={S.footer}>
+            <p style={S.footerText}>
               Vivalea · Entreprise à impact et ESS · Simulation indicative, non contractuelle.
               <br />Vos données sont traitées de manière confidentielle.
             </p>
@@ -1079,9 +1383,8 @@ function SimulateurMaPrimeAdapt() {
   );
 }
 
-
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<SimulateurMaPrimeAdapt />);
+root.render(<SimulateurAides />);
   </script>
 </body>
 </html>
